@@ -29,26 +29,33 @@ class AudioService {
     }
   }
 
-  async playAlertSound(): Promise<void> {
-    if (!this.enabled) return;
-
+  private async playBeep(): Promise<void> {
+    if (!this.enabled || !this.player) return;
     try {
-      if (this.player) {
-        await this.player.seekTo(0);
-      } else {
-        // Player is created via hook in components; this path is a fallback
-        logger.warn(LogCategory.GENERAL, "AudioService: player not initialized via hook");
-        return;
-      }
+      await this.player.seekTo(0);
       this.player.play();
     } catch (error) {
-      logger.error(LogCategory.GENERAL, "AudioService: failed to play alert", error);
+      logger.error(LogCategory.GENERAL, "AudioService: playBeep failed", error);
     }
+  }
+
+  async playAlertSound(): Promise<void> {
+    if (!this.enabled) return;
+    if (!this.player) {
+      logger.warn(LogCategory.GENERAL, "AudioService: player not initialized via hook");
+      return;
+    }
+    // Triple-beep pattern: 3 beeps × 350 ms apart
+    await this.playBeep();
+    setTimeout(() => { this.playBeep(); }, 350);
+    setTimeout(() => { this.playBeep(); }, 700);
   }
 
   async playHapticAlert(): Promise<void> {
     try {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {}), 350);
+      setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {}), 700);
     } catch {
       // Haptics not available on all devices
     }

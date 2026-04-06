@@ -26,6 +26,7 @@ import {
   getDeviceName,
 } from "@/services/deviceUtils";
 import { logger, LogCategory } from "@/services/logger";
+import { supabase } from "@/lib/supabase";
 import type {
   Staff,
   Condominium,
@@ -44,6 +45,10 @@ import type {
   Device,
   VisitStatus,
   ApprovalMode,
+  AuditLog,
+  DeviceRegistrationError,
+  CondominiumStats,
+  CondominiumSubscription,
 } from "@/types";
 import { SyncStatus as SyncStatusEnum, VisitStatus as VisitStatusEnum } from "@/types";
 import bcrypt from "bcryptjs";
@@ -411,7 +416,71 @@ class DataService {
     }
   }
 
+  async getVisitEvents(visitId: number): Promise<VisitEvent[]> {
+    const local = await db.visitEvents.where("visit_id").equals(visitId).toArray();
+    if (local.length > 0) return local.sort((a, b) => new Date(a.event_at).getTime() - new Date(b.event_at).getTime());
+    if (this.isBackendHealthy) {
+      try {
+        const remote = await callRpc<VisitEvent[]>("get_visit_events", { p_visit_id: visitId });
+        if (remote?.length) await db.visitEvents.bulkPut(remote);
+        return remote ?? [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  }
+
+  async getUnitsWithResidents(condoId?: number): Promise<Unit[]> {
+    const id = condoId ?? this.currentCondoId;
+    if (!id) return [];
+    return this.getUnits(id);
+  }
+
+  async checkOnline(): Promise<boolean> {
+    return this.isOnline;
+  }
+
   // ─── Incidents ─────────────────────────────────────────────────────────────
+
+  async getIncidents(): Promise<Incident[]> {
+    return this.getOpenIncidents();
+  }
+
+  async acknowledgeIncident(incidentId: string, staffId: number): Promise<void> {
+    if (this.isBackendHealthy) {
+      try {
+        await callRpc<void>("acknowledge_incident", {
+          p_incident_id: incidentId,
+          p_staff_id: staffId,
+        });
+        await this.refreshIncidents();
+      } catch (error) {
+        logger.error(LogCategory.SYNC, "acknowledgeIncident failed", error);
+        throw error;
+      }
+    }
+  }
+
+  async reportIncidentAction(
+    incidentId: string,
+    notes: string,
+    status: "inprogress" | "resolved"
+  ): Promise<void> {
+    if (this.isBackendHealthy) {
+      try {
+        await callRpc<void>("report_incident_action", {
+          p_incident_id: incidentId,
+          p_notes: notes,
+          p_status: status,
+        });
+        await this.refreshIncidents();
+      } catch (error) {
+        logger.error(LogCategory.SYNC, "reportIncidentAction failed", error);
+        throw error;
+      }
+    }
+  }
 
   async getOpenIncidents(): Promise<Incident[]> {
     if (!this.currentCondoId) return [];
@@ -722,6 +791,351 @@ class DataService {
   private emit(event: SyncEventType, data?: unknown): void {
     const list = this.syncCallbacks.get(event) ?? [];
     list.forEach((cb) => cb(data));
+  }
+
+  // ─── Admin API ─────────────────────────────────────────────────────────────
+
+  private async sbFrom<T>(
+    table: string,
+    select = "*",
+    filters?: Record<string, unknown>
+  ): Promise<T[]> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let q = (supabase as any).from(table).select(select);
+    if (filters) {
+      for (const [k, v] of Object.entries(filters)) {
+        if (v !== undefined && v !== null) q = q.eq(k, v);
+      }
+    }
+    const { data, error } = await q;
+    if (error) throw error;
+    return (data ?? []) as T[];
+  }
+
+  async adminGetDashboardStats(): Promise<{
+    totalCondominiums: number;
+    activeCondominiums: number;
+    totalDevices: number;
+    activeDevices: number;
+    totalStaff: number;
+    totalUnits: number;
+    totalResidents: number;
+    todayVisits: number;
+    pendingVisits: number;
+    activeIncidents: number;
+  }> {
+    const today = new Date().toISOString().slice(0, 10);
+    const [condos, devices, staff, units, residents, visits, incidents] = await Promise.all([
+      this.sbFrom<Condominium>("condominiums"),
+      this.sbFrom<Device>("devices"),
+      this.sbFrom<Staff>("staff"),
+      this.sbFrom<Unit>("units"),
+      this.sbFrom<Resident>("residents"),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (supabase as any).from("visits").select("id,status,check_in_at").gte("check_in_at", today),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (supabase as any).from("incidents").select("id,status").neq("status", "resolved"),
+    ]);
+    const visitsData: Visit[] = visits.data ?? [];
+    const incidentsData: Incident[] = incidents.data ?? [];
+    return {
+      totalCondominiums: condos.length,
+      activeCondominiums: condos.filter((c) => c.status === "ACTIVE").length,
+      totalDevices: devices.length,
+      activeDevices: devices.filter((d) => d.status === "ACTIVE").length,
+      totalStaff: staff.length,
+      totalUnits: units.length,
+      totalResidents: residents.length,
+      todayVisits: visitsData.length,
+      pendingVisits: visitsData.filter((v) => v.status === VisitStatusEnum.PENDING).length,
+      activeIncidents: incidentsData.length,
+    };
+  }
+
+  async adminGetCondominiumStats(): Promise<CondominiumStats[]> {
+    return this.sbFrom<CondominiumStats>("condominium_stats_view");
+  }
+
+  async adminGetAllCondominiums(): Promise<Condominium[]> {
+    return this.sbFrom<Condominium>("condominiums", "*", undefined);
+  }
+
+  async adminCreateCondominium(condo: Partial<Condominium>): Promise<Condominium> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any).from("condominiums").insert(condo).select().single();
+    if (error) throw error;
+    return data as Condominium;
+  }
+
+  async adminUpdateCondominium(id: number, updates: Partial<Condominium>): Promise<Condominium> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any).from("condominiums").update(updates).eq("id", id).select().single();
+    if (error) throw error;
+    return data as Condominium;
+  }
+
+  async adminGetAllStaff(condominiumId?: number): Promise<Staff[]> {
+    return this.sbFrom<Staff>("staff", "*", condominiumId ? { condominium_id: condominiumId } : undefined);
+  }
+
+  async adminCreateStaff(staff: Partial<Staff>): Promise<Staff> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any).from("staff").insert(staff).select().single();
+    if (error) throw error;
+    return data as Staff;
+  }
+
+  async adminUpdateStaff(id: number, updates: Partial<Staff>): Promise<Staff> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any).from("staff").update(updates).eq("id", id).select().single();
+    if (error) throw error;
+    return data as Staff;
+  }
+
+  async adminDeleteStaff(id: number): Promise<void> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase as any).from("staff").delete().eq("id", id);
+    if (error) throw error;
+  }
+
+  async adminGetAllUnits(condominiumId?: number): Promise<Unit[]> {
+    return this.sbFrom<Unit>("units", "*", condominiumId ? { condominium_id: condominiumId } : undefined);
+  }
+
+  async adminCreateUnit(unit: Partial<Unit>): Promise<Unit> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any).from("units").insert(unit).select().single();
+    if (error) throw error;
+    return data as Unit;
+  }
+
+  async adminUpdateUnit(id: number, updates: Partial<Unit>): Promise<Unit> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any).from("units").update(updates).eq("id", id).select().single();
+    if (error) throw error;
+    return data as Unit;
+  }
+
+  async adminDeleteUnit(id: number): Promise<void> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase as any).from("units").delete().eq("id", id);
+    if (error) throw error;
+  }
+
+  async adminGetAllResidents(condominiumId?: number): Promise<Resident[]> {
+    return this.sbFrom<Resident>("residents", "*", condominiumId ? { condominium_id: condominiumId } : undefined);
+  }
+
+  async adminCreateResident(resident: Partial<Resident>): Promise<Resident> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any).from("residents").insert(resident).select().single();
+    if (error) throw error;
+    return data as Resident;
+  }
+
+  async adminUpdateResident(id: number, updates: Partial<Resident>): Promise<Resident> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any).from("residents").update(updates).eq("id", id).select().single();
+    if (error) throw error;
+    return data as Resident;
+  }
+
+  async adminDeleteResident(id: number): Promise<void> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase as any).from("residents").delete().eq("id", id);
+    if (error) throw error;
+  }
+
+  async adminGetAllVisits(condominiumId?: number, startDate?: string): Promise<Visit[]> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let q = (supabase as any).from("visits").select("*").order("check_in_at", { ascending: false }).limit(200);
+    if (condominiumId) q = q.eq("condominium_id", condominiumId);
+    if (startDate) q = q.gte("check_in_at", startDate);
+    const { data, error } = await q;
+    if (error) throw error;
+    return (data ?? []) as Visit[];
+  }
+
+  async adminUpdateVisitStatus(id: number, status: VisitStatus): Promise<void> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase as any).from("visits").update({ status }).eq("id", id);
+    if (error) throw error;
+  }
+
+  async adminGetAllIncidents(condominiumId?: number): Promise<Incident[]> {
+    return this.sbFrom<Incident>("incidents", "*", condominiumId ? { condominium_id: condominiumId } : undefined);
+  }
+
+  async adminResolveIncident(id: string, notes: string): Promise<void> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase as any).from("incidents").update({ status: "resolved", guard_notes: notes, resolved_at: new Date().toISOString() }).eq("id", id);
+    if (error) throw error;
+  }
+
+  async adminGetAllDevices(condominiumId?: number): Promise<Device[]> {
+    return this.sbFrom<Device>("devices", "*", condominiumId ? { condominium_id: condominiumId } : undefined);
+  }
+
+  async adminDecommissionDevice(id: string): Promise<void> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase as any).from("devices").update({ status: "decommissioned" }).eq("id", id);
+    if (error) throw error;
+  }
+
+  async adminGetAllVisitTypes(): Promise<VisitTypeConfig[]> {
+    return this.sbFrom<VisitTypeConfig>("visit_types");
+  }
+
+  async adminCreateVisitType(vt: Partial<VisitTypeConfig>): Promise<VisitTypeConfig> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any).from("visit_types").insert(vt).select().single();
+    if (error) throw error;
+    return data as VisitTypeConfig;
+  }
+
+  async adminUpdateVisitType(id: number, updates: Partial<VisitTypeConfig>): Promise<VisitTypeConfig> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any).from("visit_types").update(updates).eq("id", id).select().single();
+    if (error) throw error;
+    return data as VisitTypeConfig;
+  }
+
+  async adminDeleteVisitType(id: number): Promise<void> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase as any).from("visit_types").delete().eq("id", id);
+    if (error) throw error;
+  }
+
+  async adminGetAllServiceTypes(): Promise<ServiceTypeConfig[]> {
+    return this.sbFrom<ServiceTypeConfig>("service_types");
+  }
+
+  async adminCreateServiceType(st: Partial<ServiceTypeConfig>): Promise<ServiceTypeConfig> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any).from("service_types").insert(st).select().single();
+    if (error) throw error;
+    return data as ServiceTypeConfig;
+  }
+
+  async adminUpdateServiceType(id: number, updates: Partial<ServiceTypeConfig>): Promise<ServiceTypeConfig> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any).from("service_types").update(updates).eq("id", id).select().single();
+    if (error) throw error;
+    return data as ServiceTypeConfig;
+  }
+
+  async adminDeleteServiceType(id: number): Promise<void> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase as any).from("service_types").delete().eq("id", id);
+    if (error) throw error;
+  }
+
+  async adminGetAllRestaurants(condominiumId?: number): Promise<Restaurant[]> {
+    return this.sbFrom<Restaurant>("restaurants", "*", condominiumId ? { condominium_id: condominiumId } : undefined);
+  }
+
+  async adminCreateRestaurant(r: Partial<Restaurant>): Promise<Restaurant> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any).from("restaurants").insert(r).select().single();
+    if (error) throw error;
+    return data as Restaurant;
+  }
+
+  async adminUpdateRestaurant(id: string, updates: Partial<Restaurant>): Promise<Restaurant> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any).from("restaurants").update(updates).eq("id", id).select().single();
+    if (error) throw error;
+    return data as Restaurant;
+  }
+
+  async adminDeleteRestaurant(id: string): Promise<void> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase as any).from("restaurants").delete().eq("id", id);
+    if (error) throw error;
+  }
+
+  async adminGetAllSports(condominiumId?: number): Promise<Sport[]> {
+    return this.sbFrom<Sport>("sports", "*", condominiumId ? { condominium_id: condominiumId } : undefined);
+  }
+
+  async adminCreateSport(s: Partial<Sport>): Promise<Sport> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any).from("sports").insert(s).select().single();
+    if (error) throw error;
+    return data as Sport;
+  }
+
+  async adminUpdateSport(id: string, updates: Partial<Sport>): Promise<Sport> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any).from("sports").update(updates).eq("id", id).select().single();
+    if (error) throw error;
+    return data as Sport;
+  }
+
+  async adminDeleteSport(id: string): Promise<void> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase as any).from("sports").delete().eq("id", id);
+    if (error) throw error;
+  }
+
+  async adminGetAllNews(condominiumId?: number): Promise<CondominiumNews[]> {
+    return this.sbFrom<CondominiumNews>("condominium_news", "*", condominiumId ? { condominium_id: condominiumId } : undefined);
+  }
+
+  async adminCreateNews(news: Partial<CondominiumNews>): Promise<CondominiumNews> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any).from("condominium_news").insert(news).select().single();
+    if (error) throw error;
+    return data as CondominiumNews;
+  }
+
+  async adminUpdateNews(id: number, updates: Partial<CondominiumNews>): Promise<CondominiumNews> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any).from("condominium_news").update(updates).eq("id", id).select().single();
+    if (error) throw error;
+    return data as CondominiumNews;
+  }
+
+  async adminDeleteNews(id: number): Promise<void> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase as any).from("condominium_news").delete().eq("id", id);
+    if (error) throw error;
+  }
+
+  async adminGetAuditLogs(filters?: { condominiumId?: number; limit?: number }): Promise<AuditLog[]> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let q = (supabase as any).from("audit_logs").select("*").order("created_at", { ascending: false }).limit(filters?.limit ?? 100);
+    if (filters?.condominiumId) q = q.eq("condominium_id", filters.condominiumId);
+    const { data, error } = await q;
+    if (error) throw error;
+    return (data ?? []) as AuditLog[];
+  }
+
+  async adminGetDeviceRegistrationErrors(condominiumId?: number): Promise<DeviceRegistrationError[]> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let q = (supabase as any).from("device_registration_errors").select("*").order("created_at", { ascending: false }).limit(100);
+    if (condominiumId) q = q.eq("condominium_id", condominiumId);
+    const { data, error } = await q;
+    if (error) throw error;
+    return (data ?? []) as DeviceRegistrationError[];
+  }
+
+  async adminGetCondominiumSubscriptions(): Promise<CondominiumSubscription[]> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any)
+      .from("condominium_subscriptions")
+      .select("*, condominiums(name)")
+      .order("year", { ascending: false })
+      .order("month", { ascending: false })
+      .limit(100);
+    if (error) throw error;
+    return (data ?? []) as CondominiumSubscription[];
+  }
+
+  async adminUpdateSubscriptionStatus(id: number, status: string): Promise<void> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase as any).from("condominium_subscriptions").update({ status }).eq("id", id);
+    if (error) throw error;
   }
 }
 
