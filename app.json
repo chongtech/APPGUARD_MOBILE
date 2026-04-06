@@ -1,0 +1,99 @@
+{
+  "expo": {
+    "name": "EntryFlow Guard",
+    "slug": "entryflow-guard",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "entryflowguard",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "chongtechnologies.com.entryflowguard",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Câmera necessária para fotografar visitantes e escanear QR codes.",
+        "NSMicrophoneUsageDescription": "Microfone necessário para gravação de vídeo.",
+        "NSPhotoLibraryUsageDescription": "Necessário para selecionar fotos de visitantes."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0D9488"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false,
+      "package": "chongtechnologies.com.entryflowguard",
+      "googleServicesFile": "./google-services.json",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.VIBRATE",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ]
+    },
+    "web": {
+      "output": "single",
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "@sentry/react-native/expo",
+        {
+          "organization": "chongtechnologies",
+          "project": "entryflow-guard-mobile"
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#F9FAFB",
+          "dark": {
+            "backgroundColor": "#F9FAFB"
+          }
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Câmera necessária para fotografar visitantes e escanear QR codes.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/android-icon-monochrome.png",
+          "color": "#0D9488",
+          "defaultChannel": "guard-alerts"
+        }
+      ],
+      "expo-audio",
+      "expo-sqlite"
+    ],
+    "experiments": {
+      "reactCompiler": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "TO_BE_CREATED"
+      }
+    },
+    "owner": "chongtech",
+    "updates": {
+      "url": "https://u.expo.dev/TO_BE_CREATED"
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    }
+  }
+}
