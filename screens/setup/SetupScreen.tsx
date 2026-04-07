@@ -14,6 +14,7 @@ import { Feather } from "@expo/vector-icons";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { Button } from "@/components/Button";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/services/dataService";
@@ -28,6 +29,7 @@ export default function SetupScreen() {
   const { theme } = useTheme();
   const { refreshSession } = useAuth();
   const navigation = useNavigation<NavProp>();
+  const insets = useSafeAreaInsets();
 
   const [condominiums, setCondominiums] = useState<Condominium[]>([]);
   const [selected, setSelected] = useState<Condominium | null>(null);
@@ -217,7 +219,7 @@ export default function SetupScreen() {
         )}
       </View>
 
-      <View style={styles.footer}>
+      <View style={[styles.footer, { paddingBottom: insets.bottom + Spacing.lg }]}>
         <Button
           onPress={handleConfigure}
           disabled={!selected || isConfiguring}
@@ -299,6 +301,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   condoInfo: { flex: 1, gap: 2 },
-  footer: { padding: Spacing.xl, paddingBottom: Spacing["4xl"] },
+  footer: { padding: Spacing.xl },
   configureButton: { width: "100%" },
 });
