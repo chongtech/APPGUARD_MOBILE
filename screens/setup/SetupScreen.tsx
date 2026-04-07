@@ -219,7 +219,9 @@ export default function SetupScreen() {
         )}
       </View>
 
-      <View style={[styles.footer, { paddingBottom: insets.bottom + Spacing.lg }]}>
+      <View
+        style={[styles.footer, { paddingBottom: insets.bottom + Spacing.lg }]}
+      >
         <Button
           onPress={handleConfigure}
           disabled={!selected || isConfiguring}
