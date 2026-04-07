@@ -20,6 +20,6 @@ export async function verifyStaffLogin(
 }
 
 export async function getCondominiumList(): Promise<Condominium[]> {
-  const result = await callRpc<Condominium[]>("get_condominiums_list", {});
+  const result = await callRpc<Condominium[]>("get_condominiums", {});
   return result ?? [];
 }

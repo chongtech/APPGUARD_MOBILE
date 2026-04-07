@@ -36,6 +36,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         api.getSessionStaff(),
       ]);
 
+      if (sessionStaff) {
+        logger.setUser({
+          id: sessionStaff.id,
+          name: `${sessionStaff.first_name} ${sessionStaff.last_name}`,
+          role: sessionStaff.role,
+          condominiumId: api.currentCondoId,
+        });
+      }
       setState({
         staff: sessionStaff,
         isLoading: false,
@@ -58,6 +66,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const staff = await api.login(firstName, lastName, pin);
       if (staff) {
         setState((prev) => ({ ...prev, staff }));
+        logger.setUser({
+          id: staff.id,
+          name: `${staff.first_name} ${staff.last_name}`,
+          role: staff.role,
+          condominiumId: api.currentCondoId,
+        });
       }
       return staff;
     },
@@ -66,6 +80,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(async () => {
     await api.logout();
+    logger.clearUser();
     setState((prev) => ({ ...prev, staff: null }));
   }, []);
 

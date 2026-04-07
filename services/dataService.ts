@@ -113,8 +113,10 @@ class DataService {
     this.netInfoUnsubscribe = NetInfo.addEventListener((state: import("@react-native-community/netinfo").NetInfoState) => {
       const wasOnline = this.isOnline;
       this.isOnline = state.isConnected === true && state.isInternetReachable !== false;
+      logger.setNetworkStatus(this.isOnline);
       if (!wasOnline && this.isOnline) {
         this.backendHealthScore = 3;
+        logger.trackHealthScore(3);
         this.syncPendingItems().catch(() => {});
       }
     });
@@ -122,6 +124,7 @@ class DataService {
     // Get initial connectivity state
     const netState = await NetInfo.fetch();
     this.isOnline = netState.isConnected === true && netState.isInternetReachable !== false;
+    logger.setNetworkStatus(this.isOnline);
 
     this.startHealthCheck();
     this.startHeartbeat();
@@ -156,6 +159,8 @@ class DataService {
       this.isOnline = false;
       this.backendHealthScore = Math.max(0, this.backendHealthScore - 1);
     }
+    logger.setNetworkStatus(this.isOnline);
+    logger.trackHealthScore(this.backendHealthScore);
   }
 
   // ─── Device & Setup ────────────────────────────────────────────────────────

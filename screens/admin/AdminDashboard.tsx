@@ -7,6 +7,7 @@ import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
 import { api } from "@/services/dataService";
+import { logger, LogCategory } from "@/services/logger";
 import { BrandColors, Spacing, BorderRadius } from "@/constants/theme";
 import type { AdminStackParamList } from "@/navigation/AdminStackNavigator";
 
@@ -50,7 +51,7 @@ export default function AdminDashboard() {
     try {
       const s = await api.adminGetDashboardStats();
       setStats(s);
-    } catch { /* ignore */ } finally {
+    } catch (loadError) { logger.warn(LogCategory.UI, "AdminDashboard: load failed", { error: String(loadError) }); } finally {
       setLoading(false);
       setRefreshing(false);
     }

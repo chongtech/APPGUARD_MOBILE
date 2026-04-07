@@ -11,6 +11,7 @@ import { Button } from "@/components/Button";
 import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/services/dataService";
+import { logger, LogCategory } from "@/services/logger";
 import { BrandColors, Spacing, BorderRadius } from "@/constants/theme";
 import type { Condominium } from "@/types";
 import type { AuthStackParamList } from "@/navigation/AuthNavigator";
@@ -38,6 +39,7 @@ export default function SetupScreen() {
       const list = await api.getCondominiums();
       setCondominiums(list.filter((c) => c.status === "ACTIVE"));
     } catch (error) {
+      logger.error(LogCategory.UI, "SetupScreen: loadCondominiums failed", error);
       Alert.alert("Erro", "Não foi possível carregar os condomínios. Verifique a ligação à internet.");
     } finally {
       setIsLoading(false);
@@ -52,6 +54,7 @@ export default function SetupScreen() {
       await refreshSession();
       navigation.navigate("Login");
     } catch (error) {
+      logger.error(LogCategory.UI, "SetupScreen: configureDevice failed", error);
       Alert.alert("Erro", "Não foi possível configurar o dispositivo. Tente novamente.");
     } finally {
       setIsConfiguring(false);

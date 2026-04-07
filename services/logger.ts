@@ -120,6 +120,28 @@ class Logger {
       level: "info",
     });
   }
+
+  setUser(user: { id: number; name: string; role: string; condominiumId?: number | null }): void {
+    Sentry.setUser({
+      id: String(user.id),
+      username: user.name,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      role: user.role as any,
+      condominiumId: user.condominiumId ?? undefined,
+    });
+  }
+
+  clearUser(): void {
+    Sentry.setUser(null);
+  }
+
+  trackHealthScore(score: number): void {
+    Sentry.setTag("backend_health", String(score));
+  }
+
+  setNetworkStatus(isOnline: boolean): void {
+    Sentry.setTag("network_status", isOnline ? "online" : "offline");
+  }
 }
 
 export const logger = Logger.getInstance();

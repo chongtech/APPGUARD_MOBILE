@@ -7,6 +7,7 @@ import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
 import { api } from "@/services/dataService";
+import { logger, LogCategory } from "@/services/logger";
 import { BrandColors, Spacing, BorderRadius } from "@/constants/theme";
 import type { AdminStackParamList } from "@/navigation/AdminStackNavigator";
 import type { VisitTypeConfig } from "@/types";
@@ -26,7 +27,7 @@ export default function AdminVisitTypes() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    try { setItems(await api.adminGetAllVisitTypes()); } catch { /* ignore */ } finally { setLoading(false); }
+    try { setItems(await api.adminGetAllVisitTypes()); } catch (loadError) { logger.warn(LogCategory.UI, "AdminVisitTypes: load failed", { error: String(loadError) }); } finally { setLoading(false); }
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -42,7 +43,7 @@ export default function AdminVisitTypes() {
       if (editing) await api.adminUpdateVisitType(editing.id, payload);
       else await api.adminCreateVisitType(payload);
       setModalOpen(false); load();
-    } catch (e: unknown) { Alert.alert("Erro", (e as Error).message); } finally { setSaving(false); }
+    } catch (e: unknown) { logger.error(LogCategory.UI, "AdminVisitTypes: save failed", e instanceof Error ? e : new Error(String(e))); Alert.alert("Erro", (e as Error).message); } finally { setSaving(false); }
   };
 
   const handleDelete = (v: VisitTypeConfig) => {

@@ -7,6 +7,7 @@ import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
 import { api } from "@/services/dataService";
+import { logger, LogCategory } from "@/services/logger";
 import { BrandColors, Spacing, BorderRadius } from "@/constants/theme";
 import type { AdminStackParamList } from "@/navigation/AdminStackNavigator";
 import type { Resident } from "@/types";
@@ -27,7 +28,7 @@ export default function AdminResidents() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    try { setItems(await api.adminGetAllResidents()); } catch { /* ignore */ } finally { setLoading(false); }
+    try { setItems(await api.adminGetAllResidents()); } catch (loadError) { logger.warn(LogCategory.UI, "AdminResidents: load failed", { error: String(loadError) }); } finally { setLoading(false); }
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -47,7 +48,7 @@ export default function AdminResidents() {
       if (editing) await api.adminUpdateResident(editing.id, payload);
       else await api.adminCreateResident(payload);
       setModalOpen(false); load();
-    } catch (e: unknown) { Alert.alert("Erro", (e as Error).message); } finally { setSaving(false); }
+    } catch (e: unknown) { logger.error(LogCategory.UI, "AdminResidents: save failed", e instanceof Error ? e : new Error(String(e))); Alert.alert("Erro", (e as Error).message); } finally { setSaving(false); }
   };
 
   const handleDelete = (r: Resident) => {

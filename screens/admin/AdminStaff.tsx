@@ -7,6 +7,7 @@ import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
 import { api } from "@/services/dataService";
+import { logger, LogCategory } from "@/services/logger";
 import { BrandColors, Spacing, BorderRadius } from "@/constants/theme";
 import type { AdminStackParamList } from "@/navigation/AdminStackNavigator";
 import type { Staff } from "@/types";
@@ -40,7 +41,7 @@ export default function AdminStaff() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    try { setItems(await api.adminGetAllStaff()); } catch { /* ignore */ } finally { setLoading(false); }
+    try { setItems(await api.adminGetAllStaff()); } catch (loadError) { logger.warn(LogCategory.UI, "AdminStaff: load failed", { error: String(loadError) }); } finally { setLoading(false); }
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -68,6 +69,7 @@ export default function AdminStaff() {
       setModalOpen(false);
       load();
     } catch (e: unknown) {
+      logger.error(LogCategory.UI, "AdminStaff: save failed", e instanceof Error ? e : new Error(String(e)));
       Alert.alert("Erro", (e as Error).message ?? "Não foi possível guardar.");
     } finally { setSaving(false); }
   };

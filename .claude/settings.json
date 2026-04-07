@@ -1,0 +1,56 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(npm run:*)",
+      "Bash(vercel:*)",
+      "Bash(cd:*)",
+      "Bash(git:*)",
+      "mcp__notion__*",
+      "mcp__playwright__*",
+      "mcp__supabase__*"
+    ],
+    "deny": [],
+    "ask": []
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c \"import json,sys,os; d=json.load(sys.stdin); p=d.get('file_path',''); sys.exit(2) if os.path.basename(p).startswith('.env') else sys.exit(0)\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c \"\nimport json, sys, subprocess\nd = json.load(sys.stdin)\nf = d.get('file_path', '')\nif not f.endswith(('.ts', '.tsx')): sys.exit(0)\nr = subprocess.run(['npx', 'eslint', f, '--max-warnings=0'], cwd='/mnt/c/CHONG/CHONGTECHNOLOGIES/PROJECTS/ELITECONDOGUARD/APPGUARD/src', capture_output=True, text=True)\nout = (r.stdout + r.stderr).strip()\nif out: print('[ESLint] ' + out[:800])\n\""
+          }
+        ]
+      }
+    ]
+  },
+  "enabledPlugins": {
+    "code-review@claude-plugins-official": true,
+    "context7@claude-plugins-official": true,
+    "code-simplifier@claude-plugins-official": true,
+    "vercel@claude-plugins-official": true,
+    "sentry@claude-plugins-official": true,
+    "supabase@claude-plugins-official": false,
+    "claude-md-management@claude-plugins-official": true,
+    "claude-code-setup@claude-plugins-official": true,
+    "ralph-loop@claude-plugins-official": true,
+    "security-guidance@claude-plugins-official": true,
+    "serena@claude-plugins-official": true,
+    "explanatory-output-style@claude-plugins-official": true,
+    "firecrawl@claude-plugins-official": true,
+    "semgrep@claude-plugins-official": true
+  }
+}

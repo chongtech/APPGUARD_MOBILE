@@ -7,6 +7,7 @@ import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNetInfo } from "@/hooks/useNetInfo";
 import { api } from "@/services/dataService";
+import { logger, LogCategory } from "@/services/logger";
 import { BrandColors, StatusColors, Spacing, BorderRadius, Shadows } from "@/constants/theme";
 import type { Visit, Incident } from "@/types";
 import { VisitStatus } from "@/types";
@@ -28,7 +29,9 @@ export default function DashboardScreen() {
       ]);
       setVisits(v);
       setIncidents(i);
-    } catch { /* silently fail */ }
+    } catch (error) {
+      logger.warn(LogCategory.UI, "DashboardScreen: loadData failed", { error: String(error) });
+    }
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);

@@ -11,6 +11,7 @@ import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/services/dataService";
+import { logger, LogCategory } from "@/services/logger";
 import { Image } from "react-native";
 import { BrandColors, Spacing, BorderRadius } from "@/constants/theme";
 import type { VisitTypeConfig, ServiceTypeConfig, Restaurant, Sport, Unit } from "@/types";
@@ -156,6 +157,7 @@ export default function NewEntryScreen() {
       resetForm();
       navigation.navigate("DailyList");
     } catch (err) {
+      logger.error(LogCategory.UI, "NewEntryScreen: createVisit failed", err);
       Alert.alert("Erro", "Não foi possível registar a visita. Tente novamente.");
     } finally {
       setSubmitting(false);

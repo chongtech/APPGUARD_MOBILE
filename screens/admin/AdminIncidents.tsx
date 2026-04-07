@@ -7,6 +7,7 @@ import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
 import { api } from "@/services/dataService";
+import { logger, LogCategory } from "@/services/logger";
 import { BrandColors, Spacing, BorderRadius } from "@/constants/theme";
 import type { AdminStackParamList } from "@/navigation/AdminStackNavigator";
 import type { Incident } from "@/types";
@@ -28,7 +29,7 @@ export default function AdminIncidents() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    try { setItems(await api.adminGetAllIncidents()); } catch { /* ignore */ } finally { setLoading(false); }
+    try { setItems(await api.adminGetAllIncidents()); } catch (loadError) { logger.warn(LogCategory.UI, "AdminIncidents: load failed", { error: String(loadError) }); } finally { setLoading(false); }
   }, []);
 
   useEffect(() => { load(); }, [load]);

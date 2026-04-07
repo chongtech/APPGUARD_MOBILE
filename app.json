@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "EntryFlow Guard",
-    "slug": "entryflow-guard",
+    "slug": "entryflowguard",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -65,8 +65,8 @@
         "expo-camera",
         {
           "cameraPermission": "Câmera necessária para fotografar visitantes e escanear QR codes.",
-          "microphonePermission": false,
-          "recordAudioAndroid": false
+          "microphonePermission": true,
+          "recordAudioAndroid": true
         }
       ],
       [
@@ -85,12 +85,12 @@
     },
     "extra": {
       "eas": {
-        "projectId": "TO_BE_CREATED"
+        "projectId": "314249f5-cedb-4c2e-917a-9cda552f33d7"
       }
     },
     "owner": "chongtech",
     "updates": {
-      "url": "https://u.expo.dev/TO_BE_CREATED"
+      "url": "https://u.expo.dev/314249f5-cedb-4c2e-917a-9cda552f33d7"
     },
     "runtimeVersion": {
       "policy": "appVersion"

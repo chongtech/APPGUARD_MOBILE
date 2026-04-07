@@ -7,6 +7,7 @@ import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
 import { api } from "@/services/dataService";
+import { logger, LogCategory } from "@/services/logger";
 import { BrandColors, Spacing, BorderRadius } from "@/constants/theme";
 import type { AdminStackParamList } from "@/navigation/AdminStackNavigator";
 import type { Visit } from "@/types";
@@ -31,7 +32,7 @@ export default function AdminVisits() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    try { setItems(await api.adminGetAllVisits()); } catch { /* ignore */ } finally { setLoading(false); }
+    try { setItems(await api.adminGetAllVisits()); } catch (loadError) { logger.warn(LogCategory.UI, "AdminVisits: load failed", { error: String(loadError) }); } finally { setLoading(false); }
   }, []);
 
   useEffect(() => { load(); }, [load]);

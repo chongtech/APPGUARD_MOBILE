@@ -102,7 +102,8 @@ export default function IncidentsScreen() {
               setTimeout(() => setNewAlert(false), 10_000);
               loadIncidents();
             }
-          } catch {
+          } catch (realtimeErr) {
+            logger.warn(LogCategory.REALTIME, "IncidentsScreen: resident check failed", { error: String(realtimeErr) });
             audioService.triggerIncidentAlert();
             setNewAlert(true);
             setTimeout(() => setNewAlert(false), 10_000);
@@ -122,7 +123,8 @@ export default function IncidentsScreen() {
     if (!staff) return;
     try {
       await api.acknowledgeIncident(String(incident.id), staff.id);
-    } catch {
+    } catch (error) {
+      logger.error(LogCategory.UI, "IncidentsScreen: acknowledgeIncident failed", error);
       Alert.alert("Erro", "Não foi possível confirmar a leitura do incidente.");
     }
   };
@@ -141,7 +143,8 @@ export default function IncidentsScreen() {
     try {
       await api.reportIncidentAction(String(actionModal.incident.id), actionModal.notes, actionModal.status);
       setActionModal((s) => ({ ...s, visible: false, submitting: false }));
-    } catch {
+    } catch (error) {
+      logger.error(LogCategory.UI, "IncidentsScreen: reportIncidentAction failed", error);
       Alert.alert("Erro", "Não foi possível submeter a ação.");
       setActionModal((s) => ({ ...s, submitting: false }));
     }

@@ -11,6 +11,7 @@ import PINPad from "@/components/PINPad";
 import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/contexts/ToastContext";
+import { logger, LogCategory } from "@/services/logger";
 import { BrandColors, Spacing, BorderRadius } from "@/constants/theme";
 
 export default function LoginScreen() {
@@ -43,6 +44,7 @@ export default function LoginScreen() {
         setPin("");
       }
     } catch (error) {
+      logger.error(LogCategory.AUTH, "LoginScreen: login failed", error);
       showToast("Erro ao iniciar sessão. Verifique a ligação.", "error");
       setPin("");
     } finally {

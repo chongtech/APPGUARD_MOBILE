@@ -7,6 +7,7 @@ import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
 import { api } from "@/services/dataService";
+import { logger, LogCategory } from "@/services/logger";
 import { BrandColors, Spacing, BorderRadius } from "@/constants/theme";
 import type { AdminStackParamList } from "@/navigation/AdminStackNavigator";
 import type { ServiceTypeConfig } from "@/types";
@@ -25,7 +26,7 @@ export default function AdminServiceTypes() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    try { setItems(await api.adminGetAllServiceTypes()); } catch { /* ignore */ } finally { setLoading(false); }
+    try { setItems(await api.adminGetAllServiceTypes()); } catch (loadError) { logger.warn(LogCategory.UI, "AdminServiceTypes: load failed", { error: String(loadError) }); } finally { setLoading(false); }
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -40,7 +41,7 @@ export default function AdminServiceTypes() {
       if (editing) await api.adminUpdateServiceType(editing.id, { name: name.trim() });
       else await api.adminCreateServiceType({ name: name.trim() });
       setModalOpen(false); load();
-    } catch (e: unknown) { Alert.alert("Erro", (e as Error).message); } finally { setSaving(false); }
+    } catch (e: unknown) { logger.error(LogCategory.UI, "AdminServiceTypes: save failed", e instanceof Error ? e : new Error(String(e))); Alert.alert("Erro", (e as Error).message); } finally { setSaving(false); }
   };
 
   const handleDelete = (s: ServiceTypeConfig) => {

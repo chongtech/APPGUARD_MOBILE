@@ -7,6 +7,7 @@ import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
 import { api } from "@/services/dataService";
+import { logger, LogCategory } from "@/services/logger";
 import { BrandColors, Spacing, BorderRadius } from "@/constants/theme";
 import type { AdminStackParamList } from "@/navigation/AdminStackNavigator";
 import type { Condominium } from "@/types";
@@ -28,7 +29,7 @@ export default function AdminCondominiums() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    try { setItems(await api.adminGetAllCondominiums()); } catch { /* ignore */ } finally { setLoading(false); }
+    try { setItems(await api.adminGetAllCondominiums()); } catch (loadError) { logger.warn(LogCategory.UI, "AdminCondominiums: load failed", { error: String(loadError) }); } finally { setLoading(false); }
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -49,7 +50,7 @@ export default function AdminCondominiums() {
       if (editing) await api.adminUpdateCondominium(editing.id, p);
       else await api.adminCreateCondominium(p);
       setModalOpen(false); load();
-    } catch (e: unknown) { Alert.alert("Erro", (e as Error).message); } finally { setSaving(false); }
+    } catch (e: unknown) { logger.error(LogCategory.UI, "AdminCondominiums: save failed", e instanceof Error ? e : new Error(String(e))); Alert.alert("Erro", (e as Error).message); } finally { setSaving(false); }
   };
 
   return (

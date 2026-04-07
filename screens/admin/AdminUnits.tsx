@@ -7,6 +7,7 @@ import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
 import { api } from "@/services/dataService";
+import { logger, LogCategory } from "@/services/logger";
 import { BrandColors, Spacing, BorderRadius } from "@/constants/theme";
 import type { AdminStackParamList } from "@/navigation/AdminStackNavigator";
 import type { Unit } from "@/types";
@@ -28,7 +29,7 @@ export default function AdminUnits() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    try { setItems(await api.adminGetAllUnits()); } catch { /* ignore */ } finally { setLoading(false); }
+    try { setItems(await api.adminGetAllUnits()); } catch (loadError) { logger.warn(LogCategory.UI, "AdminUnits: load failed", { error: String(loadError) }); } finally { setLoading(false); }
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -47,7 +48,7 @@ export default function AdminUnits() {
       if (editing) await api.adminUpdateUnit(editing.id, { number: number.trim(), code_block: block.trim() || undefined });
       else await api.adminCreateUnit({ number: number.trim(), code_block: block.trim() || undefined, condominium_id: Number(condoId) });
       setModalOpen(false); load();
-    } catch (e: unknown) { Alert.alert("Erro", (e as Error).message); } finally { setSaving(false); }
+    } catch (e: unknown) { logger.error(LogCategory.UI, "AdminUnits: save failed", e instanceof Error ? e : new Error(String(e))); Alert.alert("Erro", (e as Error).message); } finally { setSaving(false); }
   };
 
   const handleDelete = (u: Unit) => {

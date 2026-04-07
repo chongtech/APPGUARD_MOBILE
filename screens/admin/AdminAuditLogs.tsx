@@ -7,6 +7,7 @@ import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
 import { api } from "@/services/dataService";
+import { logger, LogCategory } from "@/services/logger";
 import { BrandColors, Spacing, BorderRadius } from "@/constants/theme";
 import type { AdminStackParamList } from "@/navigation/AdminStackNavigator";
 import type { AuditLog } from "@/types";
@@ -23,7 +24,7 @@ export default function AdminAuditLogs() {
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
-    try { setItems(await api.adminGetAuditLogs({ limit: 100 })); } catch { /* ignore */ } finally { setLoading(false); setRefreshing(false); }
+    try { setItems(await api.adminGetAuditLogs({ limit: 100 })); } catch (loadError) { logger.warn(LogCategory.UI, "AdminAuditLogs: load failed", { error: String(loadError) }); } finally { setLoading(false); setRefreshing(false); }
   }, []);
 
   useEffect(() => { load(); }, [load]);

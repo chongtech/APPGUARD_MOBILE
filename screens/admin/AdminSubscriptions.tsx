@@ -7,6 +7,7 @@ import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
 import { api } from "@/services/dataService";
+import { logger, LogCategory } from "@/services/logger";
 import { BrandColors, Spacing, BorderRadius } from "@/constants/theme";
 import type { AdminStackParamList } from "@/navigation/AdminStackNavigator";
 import type { CondominiumSubscription } from "@/types";
@@ -31,7 +32,7 @@ export default function AdminSubscriptions() {
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
-    try { setItems(await api.adminGetCondominiumSubscriptions()); } catch { /* ignore */ } finally { setLoading(false); setRefreshing(false); }
+    try { setItems(await api.adminGetCondominiumSubscriptions()); } catch (loadError) { logger.warn(LogCategory.UI, "AdminSubscriptions: load failed", { error: String(loadError) }); } finally { setLoading(false); setRefreshing(false); }
   }, []);
 
   useEffect(() => { load(); }, [load]);

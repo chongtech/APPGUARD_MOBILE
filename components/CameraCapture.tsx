@@ -6,6 +6,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import type { BarcodeScanningResult, CameraType } from "expo-camera";
 import { Feather } from "@expo/vector-icons";
 import { ThemedText } from "@/components/ThemedText";
+import { logger, LogCategory } from "@/services/logger";
 import { BrandColors, BorderRadius, Spacing } from "@/constants/theme";
 
 export type CaptureMode = "photo" | "qr";
@@ -34,8 +35,8 @@ export function CameraCapture({ visible, mode, onCapture, onScan, onClose }: Pro
         onCapture?.(photo.uri);
         onClose();
       }
-    } catch {
-      // ignore camera errors
+    } catch (error) {
+      logger.warn(LogCategory.MEDIA, "CameraCapture: takePicture failed", { error: String(error) });
     } finally {
       setCapturing(false);
     }
