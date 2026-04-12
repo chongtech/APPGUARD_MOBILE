@@ -11,13 +11,27 @@ export async function getDb(): Promise<SQLite.SQLiteDatabase> {
 
   // Run migrations based on user_version pragma
   const result = await _db.getFirstAsync<{ user_version: number }>(
-    "PRAGMA user_version"
+    "PRAGMA user_version",
   );
   const currentVersion = result?.user_version ?? 0;
 
   if (currentVersion < SCHEMA_VERSION) {
-    logger.info(LogCategory.DATABASE, `Migrating DB from v${currentVersion} to v${SCHEMA_VERSION}`);
+    logger.info(
+      LogCategory.DATABASE,
+      `Migrating DB from v${currentVersion} to v${SCHEMA_VERSION}`,
+    );
     await _db.execAsync(CREATE_TABLES_SQL);
+
+    if (currentVersion < 2) {
+      try {
+        await _db.execAsync(
+          `ALTER TABLE condominiums ADD COLUMN visitor_photo_enabled INTEGER NOT NULL DEFAULT 1`,
+        );
+      } catch {
+        // Column already exists (fresh install via CREATE TABLE)
+      }
+    }
+
     await _db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION}`);
     logger.info(LogCategory.DATABASE, `DB migration complete`);
   }

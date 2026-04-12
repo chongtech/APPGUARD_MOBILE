@@ -17,7 +17,11 @@ import { db } from "@/database/adapter";
 import { getDb } from "@/database/db";
 import { callRpc } from "@/lib/data/rpc";
 import { verifyStaffLogin, getCondominiumList } from "@/lib/data/auth";
-import { registerDevice, updateDeviceHeartbeat } from "@/lib/data/devices";
+import {
+  registerDevice,
+  updateDeviceHeartbeat,
+  setCondoVisitorPhotoSetting,
+} from "@/lib/data/devices";
 import {
   getDeviceIdentifier,
   getDeviceMetadata,
@@ -212,7 +216,10 @@ class DataService {
     }
   }
 
-  async configureDevice(condominiumId: number): Promise<Device> {
+  async configureDevice(
+    condominiumId: number,
+    visitorPhotoEnabled: boolean = true,
+  ): Promise<Device> {
     const identifier = await getDeviceIdentifier();
     const metadata = getDeviceMetadata() as unknown as Record<string, unknown>;
     const name = getDeviceName();
@@ -224,6 +231,17 @@ class DataService {
       metadata,
     });
 
+    // Save visitor photo setting to Supabase
+    try {
+      await setCondoVisitorPhotoSetting(condominiumId, visitorPhotoEnabled);
+    } catch (err) {
+      logger.warn(
+        LogCategory.AUTH,
+        "Failed to save visitor photo setting to Supabase",
+        err,
+      );
+    }
+
     await AsyncStorage.setItem(KEYS.CONDO_ID, String(condominiumId));
     await AsyncStorage.setItem(KEYS.DEVICE_ID, device.id ?? identifier);
 
@@ -233,9 +251,19 @@ class DataService {
     // Persist in local DB too
     await db.devices.put(device);
 
+    // Update local condominium record with visitor photo setting
+    const condo = await db.condominiums.get(condominiumId);
+    if (condo) {
+      await db.condominiums.put({
+        ...condo,
+        visitor_photo_enabled: visitorPhotoEnabled,
+      });
+    }
+
     logger.info(LogCategory.AUTH, "Device configured", {
       condominiumId,
       deviceId: device.id,
+      visitorPhotoEnabled,
     });
     return device;
   }
@@ -252,6 +280,11 @@ class DataService {
       return remote;
     }
     return null;
+  }
+
+  async getVisitorPhotoEnabled(): Promise<boolean> {
+    const condo = await this.getDeviceCondoDetails();
+    return condo?.visitor_photo_enabled ?? true;
   }
 
   async resetDevice(): Promise<void> {

@@ -72,6 +72,9 @@ export default function NewEntryScreen() {
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // Visitor photo config
+  const [visitorPhotoEnabled, setVisitorPhotoEnabled] = useState(true);
+
   // Picker & camera modals
   const [unitModal, setUnitModal] = useState(false);
   const [unitSearch, setUnitSearch] = useState("");
@@ -95,6 +98,7 @@ export default function NewEntryScreen() {
     setRestaurants(r);
     setSports(sp);
     setUnits(u);
+    api.getVisitorPhotoEnabled().then(setVisitorPhotoEnabled);
     setConfigLoading(false);
   }, [condoId]);
 
@@ -360,32 +364,36 @@ export default function NewEntryScreen() {
           </>
         )}
 
-        {/* Photo capture */}
-        <ThemedText type="small" style={[styles.sectionLabel, { color: theme.textSecondary }]}>
-          FOTO DO VISITANTE (opcional)
-        </ThemedText>
-        <View style={styles.photoRow}>
-          {photoUri ? (
-            <Pressable onPress={() => setCameraOpen(true)}>
-              <Image source={{ uri: photoUri }} style={styles.photoThumb} />
-            </Pressable>
-          ) : (
-            <Pressable
-              style={[styles.photoPlaceholder, { backgroundColor: theme.cardBackground, borderColor: theme.border }]}
-              onPress={() => setCameraOpen(true)}
-            >
-              <Feather name="camera" size={24} color={theme.textSecondary} />
-              <ThemedText type="small" style={{ color: theme.textSecondary, marginTop: 4 }}>Tirar Foto</ThemedText>
-            </Pressable>
-          )}
-          <Pressable
-            style={[styles.qrBtn, { backgroundColor: theme.cardBackground, borderColor: theme.border }]}
-            onPress={() => setQrOpen(true)}
-          >
-            <Feather name="maximize" size={22} color={BrandColors.primary} />
-            <ThemedText type="small" style={{ color: BrandColors.primary, marginTop: 4, fontWeight: "700" }}>Scan QR</ThemedText>
-          </Pressable>
-        </View>
+        {/* Photo capture — only when visitor photo is enabled for this condominium */}
+        {visitorPhotoEnabled && (
+          <>
+            <ThemedText type="small" style={[styles.sectionLabel, { color: theme.textSecondary }]}>
+              FOTO DO VISITANTE
+            </ThemedText>
+            <View style={styles.photoRow}>
+              {photoUri ? (
+                <Pressable onPress={() => setCameraOpen(true)}>
+                  <Image source={{ uri: photoUri }} style={styles.photoThumb} />
+                </Pressable>
+              ) : (
+                <Pressable
+                  style={[styles.photoPlaceholder, { backgroundColor: theme.cardBackground, borderColor: theme.border }]}
+                  onPress={() => setCameraOpen(true)}
+                >
+                  <Feather name="camera" size={24} color={theme.textSecondary} />
+                  <ThemedText type="small" style={{ color: theme.textSecondary, marginTop: 4 }}>Tirar Foto</ThemedText>
+                </Pressable>
+              )}
+              <Pressable
+                style={[styles.qrBtn, { backgroundColor: theme.cardBackground, borderColor: theme.border }]}
+                onPress={() => setQrOpen(true)}
+              >
+                <Feather name="maximize" size={22} color={BrandColors.primary} />
+                <ThemedText type="small" style={{ color: BrandColors.primary, marginTop: 4, fontWeight: "700" }}>Scan QR</ThemedText>
+              </Pressable>
+            </View>
+          </>
+        )}
 
         {/* Submit */}
         <Pressable

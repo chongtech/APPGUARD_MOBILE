@@ -57,6 +57,7 @@ export interface Condominium {
   contact_person?: string;
   contact_email?: string;
   manager_name?: string;
+  visitor_photo_enabled?: boolean;
   total_residents?: number;
 }
 

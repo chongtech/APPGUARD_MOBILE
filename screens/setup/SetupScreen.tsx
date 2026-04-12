@@ -36,6 +36,7 @@ export default function SetupScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [isConfiguring, setIsConfiguring] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [visitorPhotoEnabled, setVisitorPhotoEnabled] = useState(true);
 
   useEffect(() => {
     loadCondominiums();
@@ -66,7 +67,7 @@ export default function SetupScreen() {
     if (!selected) return;
     setIsConfiguring(true);
     try {
-      await api.configureDevice(selected.id);
+      await api.configureDevice(selected.id, visitorPhotoEnabled);
       await refreshSession();
       navigation.navigate("Login");
     } catch (error) {
@@ -219,6 +220,84 @@ export default function SetupScreen() {
         )}
       </View>
 
+      {selected && (
+        <View
+          style={[
+            styles.photoToggleContainer,
+            {
+              backgroundColor: theme.cardBackground,
+              borderColor: theme.border,
+            },
+          ]}
+        >
+          <View style={styles.photoToggleHeader}>
+            <Feather name="camera" size={16} color={theme.textSecondary} />
+            <ThemedText type="h4" style={{ flex: 1 }}>
+              Captura de foto do visitante
+            </ThemedText>
+          </View>
+          <ThemedText
+            type="small"
+            style={{ color: theme.textSecondary, marginBottom: Spacing.md }}
+          >
+            Quando ativado, o guarda é obrigado a fotografar o visitante antes
+            de registar a entrada.
+          </ThemedText>
+          <View style={styles.photoToggleButtons}>
+            <Pressable
+              onPress={() => setVisitorPhotoEnabled(true)}
+              style={[
+                styles.photoToggleBtn,
+                visitorPhotoEnabled
+                  ? {
+                      backgroundColor: BrandColors.primary,
+                      borderColor: BrandColors.primary,
+                    }
+                  : {
+                      backgroundColor: theme.cardBackground,
+                      borderColor: theme.border,
+                    },
+              ]}
+            >
+              <ThemedText
+                style={{
+                  fontWeight: "700",
+                  fontSize: 14,
+                  color: visitorPhotoEnabled ? "#FFFFFF" : theme.textSecondary,
+                }}
+              >
+                Sim, obrigatório
+              </ThemedText>
+            </Pressable>
+            <Pressable
+              onPress={() => setVisitorPhotoEnabled(false)}
+              style={[
+                styles.photoToggleBtn,
+                !visitorPhotoEnabled
+                  ? {
+                      backgroundColor: theme.textSecondary,
+                      borderColor: theme.textSecondary,
+                    }
+                  : {
+                      backgroundColor: theme.cardBackground,
+                      borderColor: theme.border,
+                    },
+              ]}
+            >
+              <ThemedText
+                style={{
+                  fontWeight: "700",
+                  fontSize: 14,
+                  color: !visitorPhotoEnabled ? "#FFFFFF" : theme.textSecondary,
+                }}
+              >
+                Não, ignorar
+              </ThemedText>
+            </Pressable>
+          </View>
+        </View>
+      )}
+
       <View
         style={[styles.footer, { paddingBottom: insets.bottom + Spacing.lg }]}
       >
@@ -305,4 +384,29 @@ const styles = StyleSheet.create({
   condoInfo: { flex: 1, gap: 2 },
   footer: { padding: Spacing.xl },
   configureButton: { width: "100%" },
+  photoToggleContainer: {
+    marginHorizontal: Spacing.xl,
+    marginBottom: Spacing.md,
+    padding: Spacing.lg,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+  },
+  photoToggleHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+    marginBottom: Spacing.xs,
+  },
+  photoToggleButtons: {
+    flexDirection: "row",
+    gap: Spacing.sm,
+  },
+  photoToggleBtn: {
+    flex: 1,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.md,
+    borderWidth: 2,
+    alignItems: "center",
+    justifyContent: "center",
+  },
 });

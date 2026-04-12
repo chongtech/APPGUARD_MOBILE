@@ -1,20 +1,27 @@
-import React from "react";
-import { View, ActivityIndicator, StyleSheet } from "react-native";
+import React, { useCallback, useState } from "react";
+import * as ExpoSplashScreen from "expo-splash-screen";
 import { useAuth } from "@/contexts/AuthContext";
-import { useTheme } from "@/hooks/useTheme";
-import { BrandColors } from "@/constants/theme";
 import { AuthNavigator } from "@/navigation/AuthNavigator";
 import { GuardTabNavigator } from "@/navigation/GuardTabNavigator";
+import { SplashScreen } from "@/components/SplashScreen";
+
+// Keep the native splash visible while we load
+ExpoSplashScreen.preventAutoHideAsync();
 
 export function AppContent() {
   const { staff, isLoading, isDeviceConfigured } = useAuth();
-  const { theme } = useTheme();
+  const [splashDone, setSplashDone] = useState(false);
 
-  if (isLoading) {
+  const handleSplashReady = useCallback(async () => {
+    // Hide the native splash once our animated one has finished its entrance
+    await ExpoSplashScreen.hideAsync();
+    setSplashDone(true);
+  }, []);
+
+  // Show animated splash while auth context is initializing
+  if (isLoading || !splashDone) {
     return (
-      <View style={[styles.loadingContainer, { backgroundColor: theme.backgroundRoot }]}>
-        <ActivityIndicator size="large" color={BrandColors.primary} />
-      </View>
+      <SplashScreen onReady={!isLoading ? handleSplashReady : undefined} />
     );
   }
 
@@ -25,7 +32,3 @@ export function AppContent() {
 
   return <GuardTabNavigator />;
 }
-
-const styles = StyleSheet.create({
-  loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
-});
