@@ -1,4 +1,4 @@
-import { Sentry } from "@/config/sentry";
+import { flushSentry, Sentry } from "@/config/sentry";
 
 export enum LogCategory {
   AUTH = "auth",
@@ -64,17 +64,29 @@ class Logger {
     return Logger.instance;
   }
 
-  debug(category: LogCategory, message: string, data?: Record<string, unknown>): void {
+  debug(
+    category: LogCategory,
+    message: string,
+    data?: Record<string, unknown>,
+  ): void {
     if (__DEV__) console.log(`[${category}] ${message}`, data ?? "");
     Sentry.addBreadcrumb({ category, message, data, level: "debug" });
   }
 
-  info(category: LogCategory, message: string, data?: Record<string, unknown>): void {
+  info(
+    category: LogCategory,
+    message: string,
+    data?: Record<string, unknown>,
+  ): void {
     if (__DEV__) console.log(`[${category}] ${message}`, data ?? "");
     Sentry.addBreadcrumb({ category, message, data, level: "info" });
   }
 
-  warn(category: LogCategory, message: string, data?: Record<string, unknown>): void {
+  warn(
+    category: LogCategory,
+    message: string,
+    data?: Record<string, unknown>,
+  ): void {
     if (__DEV__) console.warn(`[${category}] ${message}`, data ?? "");
     Sentry.addBreadcrumb({ category, message, data, level: "warning" });
   }
@@ -83,9 +95,10 @@ class Logger {
     category: LogCategory,
     message: string,
     error?: unknown,
-    data?: Record<string, unknown>
+    data?: Record<string, unknown>,
   ): void {
-    if (__DEV__) console.error(`[${category}] ${message}`, error ?? "", data ?? "");
+    if (__DEV__)
+      console.error(`[${category}] ${message}`, error ?? "", data ?? "");
 
     Sentry.addBreadcrumb({ category, message, data, level: "error" });
 
@@ -100,7 +113,11 @@ class Logger {
         Sentry.captureException(error);
       } else if (error !== undefined) {
         const normalizedError = new Error(getErrorMessage(error));
-        if (isRecord(error) && typeof error.name === "string" && error.name.trim()) {
+        if (
+          isRecord(error) &&
+          typeof error.name === "string" &&
+          error.name.trim()
+        ) {
           normalizedError.name = error.name;
         }
         Sentry.captureException(normalizedError);
@@ -108,6 +125,8 @@ class Logger {
         Sentry.captureMessage(message, "error");
       }
     });
+
+    flushSentry();
   }
 
   trackAction(action: string, data?: Record<string, unknown>): void {
@@ -121,7 +140,12 @@ class Logger {
     });
   }
 
-  setUser(user: { id: number; name: string; role: string; condominiumId?: number | null }): void {
+  setUser(user: {
+    id: number;
+    name: string;
+    role: string;
+    condominiumId?: number | null;
+  }): void {
     Sentry.setUser({
       id: String(user.id),
       username: user.name,

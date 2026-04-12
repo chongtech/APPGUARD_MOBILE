@@ -1,6 +1,7 @@
 import * as Sentry from "@sentry/react-native";
 
 export { Sentry };
+let sentryEnabled = false;
 
 // Navigation integration ref — pass to NavigationContainer via ref prop
 export const navigationIntegration = Sentry.reactNavigationIntegration({
@@ -8,7 +9,14 @@ export const navigationIntegration = Sentry.reactNavigationIntegration({
 });
 
 const PHONE_REGEX = /\+?\d{10,15}/g;
-const PII_KEYS = ["pin", "pin_hash", "password", "token", "device_token", "push_token"];
+const PII_KEYS = [
+  "pin",
+  "pin_hash",
+  "password",
+  "token",
+  "device_token",
+  "push_token",
+];
 
 function scrubObject(obj: Record<string, unknown>): Record<string, unknown> {
   const result = { ...obj };
@@ -22,22 +30,38 @@ function scrubString(value: string): string {
   return value.replace(PHONE_REGEX, "[PHONE]");
 }
 
+export function flushSentry(timeout = 2000): void {
+  if (!sentryEnabled) return;
+
+  void Sentry.flush(timeout).catch((error) => {
+    if (__DEV__) console.warn("[Sentry] Flush failed", error);
+  });
+}
+
 export function initSentry(): void {
   const dsn = process.env.EXPO_PUBLIC_SENTRY_DSN;
   const enableInDev = process.env.EXPO_PUBLIC_SENTRY_ENABLE_DEV === "true";
+  const enabled = !__DEV__ || enableInDev;
 
   if (!dsn) {
-    if (__DEV__) console.warn("[Sentry] EXPO_PUBLIC_SENTRY_DSN not set — Sentry disabled");
+    sentryEnabled = false;
+    if (__DEV__)
+      console.warn("[Sentry] EXPO_PUBLIC_SENTRY_DSN not set — Sentry disabled");
     return;
   }
 
   if (__DEV__ && !enableInDev) {
-    console.warn("[Sentry] Running in development — remote reporting disabled. Set EXPO_PUBLIC_SENTRY_ENABLE_DEV=true to test Sentry locally.");
+    console.warn(
+      "[Sentry] Running in development — remote reporting disabled. Set EXPO_PUBLIC_SENTRY_ENABLE_DEV=true to test Sentry locally.",
+    );
   }
+
+  sentryEnabled = enabled;
 
   Sentry.init({
     dsn,
-    enabled: !__DEV__ || enableInDev,
+    enabled,
+    debug: __DEV__,
     tracesSampleRate: 0.2,
     profilesSampleRate: 0.1,
     attachStacktrace: true,

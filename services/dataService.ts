@@ -12,14 +12,12 @@
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
+import { flushSentry } from "@/config/sentry";
 import { db } from "@/database/adapter";
 import { getDb } from "@/database/db";
 import { callRpc } from "@/lib/data/rpc";
 import { verifyStaffLogin, getCondominiumList } from "@/lib/data/auth";
-import {
-  registerDevice,
-  updateDeviceHeartbeat,
-} from "@/lib/data/devices";
+import { registerDevice, updateDeviceHeartbeat } from "@/lib/data/devices";
 import {
   getDeviceIdentifier,
   getDeviceMetadata,
@@ -50,7 +48,10 @@ import type {
   CondominiumStats,
   CondominiumSubscription,
 } from "@/types";
-import { SyncStatus as SyncStatusEnum, VisitStatus as VisitStatusEnum } from "@/types";
+import {
+  SyncStatus as SyncStatusEnum,
+  VisitStatus as VisitStatusEnum,
+} from "@/types";
 import bcrypt from "bcryptjs";
 
 // ─── Storage Keys ─────────────────────────────────────────────────────────────
@@ -63,7 +64,11 @@ const KEYS = {
 };
 
 // ─── Sync Event Callbacks ─────────────────────────────────────────────────────
-type SyncEventType = "sync:start" | "sync:complete" | "sync:error" | "sync:progress";
+type SyncEventType =
+  | "sync:start"
+  | "sync:complete"
+  | "sync:error"
+  | "sync:progress";
 type SyncEventCallback = (data?: unknown) => void;
 
 class DataService {
@@ -110,20 +115,25 @@ class DataService {
     this.currentDeviceId = deviceId;
 
     // Subscribe to connectivity changes
-    this.netInfoUnsubscribe = NetInfo.addEventListener((state: import("@react-native-community/netinfo").NetInfoState) => {
-      const wasOnline = this.isOnline;
-      this.isOnline = state.isConnected === true && state.isInternetReachable !== false;
-      logger.setNetworkStatus(this.isOnline);
-      if (!wasOnline && this.isOnline) {
-        this.backendHealthScore = 3;
-        logger.trackHealthScore(3);
-        this.syncPendingItems().catch(() => {});
-      }
-    });
+    this.netInfoUnsubscribe = NetInfo.addEventListener(
+      (state: import("@react-native-community/netinfo").NetInfoState) => {
+        const wasOnline = this.isOnline;
+        this.isOnline =
+          state.isConnected === true && state.isInternetReachable !== false;
+        logger.setNetworkStatus(this.isOnline);
+        if (!wasOnline && this.isOnline) {
+          this.backendHealthScore = 3;
+          logger.trackHealthScore(3);
+          flushSentry();
+          this.syncPendingItems().catch(() => {});
+        }
+      },
+    );
 
     // Get initial connectivity state
     const netState = await NetInfo.fetch();
-    this.isOnline = netState.isConnected === true && netState.isInternetReachable !== false;
+    this.isOnline =
+      netState.isConnected === true && netState.isInternetReachable !== false;
     logger.setNetworkStatus(this.isOnline);
 
     this.startHealthCheck();
@@ -183,6 +193,12 @@ class DataService {
       await db.condominiums.bulkPut(remote);
       return remote;
     }
+    logger.error(
+      LogCategory.SYNC,
+      "getCondominiums: offline with no cached data",
+      undefined,
+      { isOnline: this.isOnline, healthScore: this.backendHealthScore },
+    );
     return [];
   }
 
@@ -217,7 +233,10 @@ class DataService {
     // Persist in local DB too
     await db.devices.put(device);
 
-    logger.info(LogCategory.AUTH, "Device configured", { condominiumId, deviceId: device.id });
+    logger.info(LogCategory.AUTH, "Device configured", {
+      condominiumId,
+      deviceId: device.id,
+    });
     return device;
   }
 
@@ -250,7 +269,7 @@ class DataService {
   async login(
     firstName: string,
     lastName: string,
-    pin: string
+    pin: string,
   ): Promise<Staff | null> {
     if (!this.currentCondoId) {
       throw new Error("Device not configured. Set up the device first.");
@@ -261,7 +280,11 @@ class DataService {
 
     if (this.isBackendHealthy) {
       try {
-        const result = await verifyStaffLogin(fName, lName, this.currentCondoId);
+        const result = await verifyStaffLogin(
+          fName,
+          lName,
+          this.currentCondoId,
+        );
         if (!result) return null;
 
         const { staff, pin_hash } = result;
@@ -273,10 +296,17 @@ class DataService {
         await db.staff.put(staffWithHash);
         await AsyncStorage.setItem(KEYS.SESSION_STAFF_ID, String(staff.id));
 
-        logger.trackAction("login_success", { staffId: staff.id, role: staff.role });
+        logger.trackAction("login_success", {
+          staffId: staff.id,
+          role: staff.role,
+        });
         return staff;
       } catch (error) {
-        logger.error(LogCategory.AUTH, "Online login failed, trying offline", error);
+        logger.error(
+          LogCategory.AUTH,
+          "Online login failed, trying offline",
+          error,
+        );
         this.backendHealthScore--;
       }
     }
@@ -284,7 +314,7 @@ class DataService {
     // Offline fallback — compare against cached pin_hash in SQLite
     const rows = await db.staff.rawQuery(
       `SELECT * FROM staff WHERE UPPER(first_name) = ? AND UPPER(last_name) = ? AND condominium_id = ? LIMIT 1`,
-      [fName, lName, this.currentCondoId]
+      [fName, lName, this.currentCondoId],
     );
     const staffRow = rows[0];
     if (!staffRow?.pin_hash) return null;
@@ -319,7 +349,7 @@ class DataService {
 
     const local = await db.visits.rawQuery(
       `SELECT * FROM visits WHERE condominium_id = ? AND check_in_at >= ? ORDER BY check_in_at DESC`,
-      [this.currentCondoId, todayStr]
+      [this.currentCondoId, todayStr],
     );
 
     if (local.length > 0) {
@@ -383,7 +413,7 @@ class DataService {
     visitId: number,
     status: VisitStatus,
     actorId: number,
-    mode?: ApprovalMode
+    mode?: ApprovalMode,
   ): Promise<void> {
     const event: VisitEvent = {
       visit_id: visitId,
@@ -395,12 +425,17 @@ class DataService {
     };
 
     await db.visitEvents.put(event);
-    await db.visits.where("id").equals(visitId).modify({
-      status,
-      ...(mode ? { approval_mode: mode } : {}),
-      ...(status === VisitStatusEnum.LEFT ? { check_out_at: event.event_at } : {}),
-      sync_status: SyncStatusEnum.PENDING_SYNC,
-    });
+    await db.visits
+      .where("id")
+      .equals(visitId)
+      .modify({
+        status,
+        ...(mode ? { approval_mode: mode } : {}),
+        ...(status === VisitStatusEnum.LEFT
+          ? { check_out_at: event.event_at }
+          : {}),
+        sync_status: SyncStatusEnum.PENDING_SYNC,
+      });
 
     if (this.isBackendHealthy) {
       try {
@@ -422,11 +457,20 @@ class DataService {
   }
 
   async getVisitEvents(visitId: number): Promise<VisitEvent[]> {
-    const local = await db.visitEvents.where("visit_id").equals(visitId).toArray();
-    if (local.length > 0) return local.sort((a, b) => new Date(a.event_at).getTime() - new Date(b.event_at).getTime());
+    const local = await db.visitEvents
+      .where("visit_id")
+      .equals(visitId)
+      .toArray();
+    if (local.length > 0)
+      return local.sort(
+        (a, b) =>
+          new Date(a.event_at).getTime() - new Date(b.event_at).getTime(),
+      );
     if (this.isBackendHealthy) {
       try {
-        const remote = await callRpc<VisitEvent[]>("get_visit_events", { p_visit_id: visitId });
+        const remote = await callRpc<VisitEvent[]>("get_visit_events", {
+          p_visit_id: visitId,
+        });
         if (remote?.length) await db.visitEvents.bulkPut(remote);
         return remote ?? [];
       } catch {
@@ -452,7 +496,10 @@ class DataService {
     return this.getOpenIncidents();
   }
 
-  async acknowledgeIncident(incidentId: string, staffId: number): Promise<void> {
+  async acknowledgeIncident(
+    incidentId: string,
+    staffId: number,
+  ): Promise<void> {
     if (this.isBackendHealthy) {
       try {
         await callRpc<void>("acknowledge_incident", {
@@ -470,7 +517,7 @@ class DataService {
   async reportIncidentAction(
     incidentId: string,
     notes: string,
-    status: "inprogress" | "resolved"
+    status: "inprogress" | "resolved",
   ): Promise<void> {
     if (this.isBackendHealthy) {
       try {
@@ -492,7 +539,7 @@ class DataService {
 
     const local = await db.incidents.rawQuery(
       `SELECT * FROM incidents WHERE status NOT IN ('resolved', 'closed') ORDER BY reported_at DESC`,
-      []
+      [],
     );
 
     if (local.length > 0) {
@@ -557,7 +604,10 @@ class DataService {
 
   private async refreshServiceTypes(): Promise<ServiceTypeConfig[]> {
     try {
-      const remote = await callRpc<ServiceTypeConfig[]>("get_service_types", {});
+      const remote = await callRpc<ServiceTypeConfig[]>(
+        "get_service_types",
+        {},
+      );
       if (remote?.length) await db.serviceTypes.bulkPut(remote);
       return remote ?? [];
     } catch (error) {
@@ -567,9 +617,13 @@ class DataService {
   }
 
   async getRestaurants(condoId: number): Promise<Restaurant[]> {
-    const local = await db.restaurants.where("condominium_id").equals(condoId).toArray();
+    const local = await db.restaurants
+      .where("condominium_id")
+      .equals(condoId)
+      .toArray();
     if (local.length > 0) {
-      if (this.isBackendHealthy) this.refreshRestaurants(condoId).catch(() => {});
+      if (this.isBackendHealthy)
+        this.refreshRestaurants(condoId).catch(() => {});
       return local;
     }
     if (this.isBackendHealthy) return this.refreshRestaurants(condoId);
@@ -590,7 +644,10 @@ class DataService {
   }
 
   async getSports(condoId: number): Promise<Sport[]> {
-    const local = await db.sports.where("condominium_id").equals(condoId).toArray();
+    const local = await db.sports
+      .where("condominium_id")
+      .equals(condoId)
+      .toArray();
     if (local.length > 0) {
       if (this.isBackendHealthy) this.refreshSports(condoId).catch(() => {});
       return local;
@@ -613,7 +670,10 @@ class DataService {
   }
 
   async getUnits(condoId: number): Promise<Unit[]> {
-    const local = await db.units.where("condominium_id").equals(condoId).toArray();
+    const local = await db.units
+      .where("condominium_id")
+      .equals(condoId)
+      .toArray();
     if (local.length > 0) {
       if (this.isBackendHealthy) this.refreshUnits(condoId).catch(() => {});
       return local;
@@ -636,7 +696,10 @@ class DataService {
   }
 
   async getResidents(condoId: number): Promise<Resident[]> {
-    const local = await db.residents.where("condominium_id").equals(condoId).toArray();
+    const local = await db.residents
+      .where("condominium_id")
+      .equals(condoId)
+      .toArray();
     if (local.length > 0) {
       if (this.isBackendHealthy) this.refreshResidents(condoId).catch(() => {});
       return local;
@@ -659,7 +722,10 @@ class DataService {
   }
 
   async getNews(condoId: number): Promise<CondominiumNews[]> {
-    const local = await db.news.where("condominium_id").equals(condoId).toArray();
+    const local = await db.news
+      .where("condominium_id")
+      .equals(condoId)
+      .toArray();
     if (local.length > 0) {
       if (this.isBackendHealthy) this.refreshNews(condoId).catch(() => {});
       return local;
@@ -690,7 +756,9 @@ class DataService {
         const remote = await callRpc<IncidentType[]>("get_incident_types", {});
         if (remote?.length) await db.incidentTypes.bulkPut(remote);
         return remote ?? [];
-      } catch { return []; }
+      } catch {
+        return [];
+      }
     }
     return [];
   }
@@ -700,10 +768,15 @@ class DataService {
     if (local.length > 0) return local;
     if (this.isBackendHealthy) {
       try {
-        const remote = await callRpc<IncidentStatus[]>("get_incident_statuses", {});
+        const remote = await callRpc<IncidentStatus[]>(
+          "get_incident_statuses",
+          {},
+        );
         if (remote?.length) await db.incidentStatuses.bulkPut(remote);
         return remote ?? [];
-      } catch { return []; }
+      } catch {
+        return [];
+      }
     }
     return [];
   }
@@ -717,7 +790,8 @@ class DataService {
 
     try {
       // Sync pending visits
-      const pendingVisits = await db.visits.where("sync_status")
+      const pendingVisits = await db.visits
+        .where("sync_status")
         .equals(SyncStatusEnum.PENDING_SYNC)
         .toArray();
 
@@ -727,7 +801,10 @@ class DataService {
             p_visit: visit,
             p_device_id: this.currentDeviceId,
           });
-          const synced: Visit = { ...remote, sync_status: SyncStatusEnum.SYNCED };
+          const synced: Visit = {
+            ...remote,
+            sync_status: SyncStatusEnum.SYNCED,
+          };
           await db.visits.delete(visit.id);
           await db.visits.put(synced);
         } catch {
@@ -736,7 +813,8 @@ class DataService {
       }
 
       // Sync pending visit events
-      const pendingEvents = await db.visitEvents.where("sync_status")
+      const pendingEvents = await db.visitEvents
+        .where("sync_status")
         .equals(SyncStatusEnum.PENDING_SYNC)
         .toArray();
 
@@ -790,7 +868,10 @@ class DataService {
 
   off(event: SyncEventType, callback: SyncEventCallback): void {
     const list = this.syncCallbacks.get(event) ?? [];
-    this.syncCallbacks.set(event, list.filter((cb) => cb !== callback));
+    this.syncCallbacks.set(
+      event,
+      list.filter((cb) => cb !== callback),
+    );
   }
 
   private emit(event: SyncEventType, data?: unknown): void {
@@ -803,7 +884,7 @@ class DataService {
   private async sbFrom<T>(
     table: string,
     select = "*",
-    filters?: Record<string, unknown>
+    filters?: Record<string, unknown>,
   ): Promise<T[]> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let q = (supabase as any).from(table).select(select);
@@ -830,17 +911,24 @@ class DataService {
     activeIncidents: number;
   }> {
     const today = new Date().toISOString().slice(0, 10);
-    const [condos, devices, staff, units, residents, visits, incidents] = await Promise.all([
-      this.sbFrom<Condominium>("condominiums"),
-      this.sbFrom<Device>("devices"),
-      this.sbFrom<Staff>("staff"),
-      this.sbFrom<Unit>("units"),
-      this.sbFrom<Resident>("residents"),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (supabase as any).from("visits").select("id,status,check_in_at").gte("check_in_at", today),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (supabase as any).from("incidents").select("id,status").neq("status", "resolved"),
-    ]);
+    const [condos, devices, staff, units, residents, visits, incidents] =
+      await Promise.all([
+        this.sbFrom<Condominium>("condominiums"),
+        this.sbFrom<Device>("devices"),
+        this.sbFrom<Staff>("staff"),
+        this.sbFrom<Unit>("units"),
+        this.sbFrom<Resident>("residents"),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (supabase as any)
+          .from("visits")
+          .select("id,status,check_in_at")
+          .gte("check_in_at", today),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (supabase as any)
+          .from("incidents")
+          .select("id,status")
+          .neq("status", "resolved"),
+      ]);
     const visitsData: Visit[] = visits.data ?? [];
     const incidentsData: Incident[] = incidents.data ?? [];
     return {
@@ -852,7 +940,9 @@ class DataService {
       totalUnits: units.length,
       totalResidents: residents.length,
       todayVisits: visitsData.length,
-      pendingVisits: visitsData.filter((v) => v.status === VisitStatusEnum.PENDING).length,
+      pendingVisits: visitsData.filter(
+        (v) => v.status === VisitStatusEnum.PENDING,
+      ).length,
       activeIncidents: incidentsData.length,
     };
   }
@@ -865,95 +955,167 @@ class DataService {
     return this.sbFrom<Condominium>("condominiums", "*", undefined);
   }
 
-  async adminCreateCondominium(condo: Partial<Condominium>): Promise<Condominium> {
+  async adminCreateCondominium(
+    condo: Partial<Condominium>,
+  ): Promise<Condominium> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await (supabase as any).from("condominiums").insert(condo).select().single();
+    const { data, error } = await (supabase as any)
+      .from("condominiums")
+      .insert(condo)
+      .select()
+      .single();
     if (error) throw error;
     return data as Condominium;
   }
 
-  async adminUpdateCondominium(id: number, updates: Partial<Condominium>): Promise<Condominium> {
+  async adminUpdateCondominium(
+    id: number,
+    updates: Partial<Condominium>,
+  ): Promise<Condominium> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await (supabase as any).from("condominiums").update(updates).eq("id", id).select().single();
+    const { data, error } = await (supabase as any)
+      .from("condominiums")
+      .update(updates)
+      .eq("id", id)
+      .select()
+      .single();
     if (error) throw error;
     return data as Condominium;
   }
 
   async adminGetAllStaff(condominiumId?: number): Promise<Staff[]> {
-    return this.sbFrom<Staff>("staff", "*", condominiumId ? { condominium_id: condominiumId } : undefined);
+    return this.sbFrom<Staff>(
+      "staff",
+      "*",
+      condominiumId ? { condominium_id: condominiumId } : undefined,
+    );
   }
 
   async adminCreateStaff(staff: Partial<Staff>): Promise<Staff> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await (supabase as any).from("staff").insert(staff).select().single();
+    const { data, error } = await (supabase as any)
+      .from("staff")
+      .insert(staff)
+      .select()
+      .single();
     if (error) throw error;
     return data as Staff;
   }
 
   async adminUpdateStaff(id: number, updates: Partial<Staff>): Promise<Staff> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await (supabase as any).from("staff").update(updates).eq("id", id).select().single();
+    const { data, error } = await (supabase as any)
+      .from("staff")
+      .update(updates)
+      .eq("id", id)
+      .select()
+      .single();
     if (error) throw error;
     return data as Staff;
   }
 
   async adminDeleteStaff(id: number): Promise<void> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error } = await (supabase as any).from("staff").delete().eq("id", id);
+    const { error } = await (supabase as any)
+      .from("staff")
+      .delete()
+      .eq("id", id);
     if (error) throw error;
   }
 
   async adminGetAllUnits(condominiumId?: number): Promise<Unit[]> {
-    return this.sbFrom<Unit>("units", "*", condominiumId ? { condominium_id: condominiumId } : undefined);
+    return this.sbFrom<Unit>(
+      "units",
+      "*",
+      condominiumId ? { condominium_id: condominiumId } : undefined,
+    );
   }
 
   async adminCreateUnit(unit: Partial<Unit>): Promise<Unit> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await (supabase as any).from("units").insert(unit).select().single();
+    const { data, error } = await (supabase as any)
+      .from("units")
+      .insert(unit)
+      .select()
+      .single();
     if (error) throw error;
     return data as Unit;
   }
 
   async adminUpdateUnit(id: number, updates: Partial<Unit>): Promise<Unit> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await (supabase as any).from("units").update(updates).eq("id", id).select().single();
+    const { data, error } = await (supabase as any)
+      .from("units")
+      .update(updates)
+      .eq("id", id)
+      .select()
+      .single();
     if (error) throw error;
     return data as Unit;
   }
 
   async adminDeleteUnit(id: number): Promise<void> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error } = await (supabase as any).from("units").delete().eq("id", id);
+    const { error } = await (supabase as any)
+      .from("units")
+      .delete()
+      .eq("id", id);
     if (error) throw error;
   }
 
   async adminGetAllResidents(condominiumId?: number): Promise<Resident[]> {
-    return this.sbFrom<Resident>("residents", "*", condominiumId ? { condominium_id: condominiumId } : undefined);
+    return this.sbFrom<Resident>(
+      "residents",
+      "*",
+      condominiumId ? { condominium_id: condominiumId } : undefined,
+    );
   }
 
   async adminCreateResident(resident: Partial<Resident>): Promise<Resident> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await (supabase as any).from("residents").insert(resident).select().single();
+    const { data, error } = await (supabase as any)
+      .from("residents")
+      .insert(resident)
+      .select()
+      .single();
     if (error) throw error;
     return data as Resident;
   }
 
-  async adminUpdateResident(id: number, updates: Partial<Resident>): Promise<Resident> {
+  async adminUpdateResident(
+    id: number,
+    updates: Partial<Resident>,
+  ): Promise<Resident> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await (supabase as any).from("residents").update(updates).eq("id", id).select().single();
+    const { data, error } = await (supabase as any)
+      .from("residents")
+      .update(updates)
+      .eq("id", id)
+      .select()
+      .single();
     if (error) throw error;
     return data as Resident;
   }
 
   async adminDeleteResident(id: number): Promise<void> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error } = await (supabase as any).from("residents").delete().eq("id", id);
+    const { error } = await (supabase as any)
+      .from("residents")
+      .delete()
+      .eq("id", id);
     if (error) throw error;
   }
 
-  async adminGetAllVisits(condominiumId?: number, startDate?: string): Promise<Visit[]> {
+  async adminGetAllVisits(
+    condominiumId?: number,
+    startDate?: string,
+  ): Promise<Visit[]> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let q = (supabase as any).from("visits").select("*").order("check_in_at", { ascending: false }).limit(200);
+    let q = (supabase as any)
+      .from("visits")
+      .select("*")
+      .order("check_in_at", { ascending: false })
+      .limit(200);
     if (condominiumId) q = q.eq("condominium_id", condominiumId);
     if (startDate) q = q.gte("check_in_at", startDate);
     const { data, error } = await q;
@@ -963,27 +1125,48 @@ class DataService {
 
   async adminUpdateVisitStatus(id: number, status: VisitStatus): Promise<void> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error } = await (supabase as any).from("visits").update({ status }).eq("id", id);
+    const { error } = await (supabase as any)
+      .from("visits")
+      .update({ status })
+      .eq("id", id);
     if (error) throw error;
   }
 
   async adminGetAllIncidents(condominiumId?: number): Promise<Incident[]> {
-    return this.sbFrom<Incident>("incidents", "*", condominiumId ? { condominium_id: condominiumId } : undefined);
+    return this.sbFrom<Incident>(
+      "incidents",
+      "*",
+      condominiumId ? { condominium_id: condominiumId } : undefined,
+    );
   }
 
   async adminResolveIncident(id: string, notes: string): Promise<void> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error } = await (supabase as any).from("incidents").update({ status: "resolved", guard_notes: notes, resolved_at: new Date().toISOString() }).eq("id", id);
+    const { error } = await (supabase as any)
+      .from("incidents")
+      .update({
+        status: "resolved",
+        guard_notes: notes,
+        resolved_at: new Date().toISOString(),
+      })
+      .eq("id", id);
     if (error) throw error;
   }
 
   async adminGetAllDevices(condominiumId?: number): Promise<Device[]> {
-    return this.sbFrom<Device>("devices", "*", condominiumId ? { condominium_id: condominiumId } : undefined);
+    return this.sbFrom<Device>(
+      "devices",
+      "*",
+      condominiumId ? { condominium_id: condominiumId } : undefined,
+    );
   }
 
   async adminDecommissionDevice(id: string): Promise<void> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error } = await (supabase as any).from("devices").update({ status: "decommissioned" }).eq("id", id);
+    const { error } = await (supabase as any)
+      .from("devices")
+      .update({ status: "decommissioned" })
+      .eq("id", id);
     if (error) throw error;
   }
 
@@ -991,23 +1174,40 @@ class DataService {
     return this.sbFrom<VisitTypeConfig>("visit_types");
   }
 
-  async adminCreateVisitType(vt: Partial<VisitTypeConfig>): Promise<VisitTypeConfig> {
+  async adminCreateVisitType(
+    vt: Partial<VisitTypeConfig>,
+  ): Promise<VisitTypeConfig> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await (supabase as any).from("visit_types").insert(vt).select().single();
+    const { data, error } = await (supabase as any)
+      .from("visit_types")
+      .insert(vt)
+      .select()
+      .single();
     if (error) throw error;
     return data as VisitTypeConfig;
   }
 
-  async adminUpdateVisitType(id: number, updates: Partial<VisitTypeConfig>): Promise<VisitTypeConfig> {
+  async adminUpdateVisitType(
+    id: number,
+    updates: Partial<VisitTypeConfig>,
+  ): Promise<VisitTypeConfig> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await (supabase as any).from("visit_types").update(updates).eq("id", id).select().single();
+    const { data, error } = await (supabase as any)
+      .from("visit_types")
+      .update(updates)
+      .eq("id", id)
+      .select()
+      .single();
     if (error) throw error;
     return data as VisitTypeConfig;
   }
 
   async adminDeleteVisitType(id: number): Promise<void> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error } = await (supabase as any).from("visit_types").delete().eq("id", id);
+    const { error } = await (supabase as any)
+      .from("visit_types")
+      .delete()
+      .eq("id", id);
     if (error) throw error;
   }
 
@@ -1015,110 +1215,197 @@ class DataService {
     return this.sbFrom<ServiceTypeConfig>("service_types");
   }
 
-  async adminCreateServiceType(st: Partial<ServiceTypeConfig>): Promise<ServiceTypeConfig> {
+  async adminCreateServiceType(
+    st: Partial<ServiceTypeConfig>,
+  ): Promise<ServiceTypeConfig> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await (supabase as any).from("service_types").insert(st).select().single();
+    const { data, error } = await (supabase as any)
+      .from("service_types")
+      .insert(st)
+      .select()
+      .single();
     if (error) throw error;
     return data as ServiceTypeConfig;
   }
 
-  async adminUpdateServiceType(id: number, updates: Partial<ServiceTypeConfig>): Promise<ServiceTypeConfig> {
+  async adminUpdateServiceType(
+    id: number,
+    updates: Partial<ServiceTypeConfig>,
+  ): Promise<ServiceTypeConfig> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await (supabase as any).from("service_types").update(updates).eq("id", id).select().single();
+    const { data, error } = await (supabase as any)
+      .from("service_types")
+      .update(updates)
+      .eq("id", id)
+      .select()
+      .single();
     if (error) throw error;
     return data as ServiceTypeConfig;
   }
 
   async adminDeleteServiceType(id: number): Promise<void> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error } = await (supabase as any).from("service_types").delete().eq("id", id);
+    const { error } = await (supabase as any)
+      .from("service_types")
+      .delete()
+      .eq("id", id);
     if (error) throw error;
   }
 
   async adminGetAllRestaurants(condominiumId?: number): Promise<Restaurant[]> {
-    return this.sbFrom<Restaurant>("restaurants", "*", condominiumId ? { condominium_id: condominiumId } : undefined);
+    return this.sbFrom<Restaurant>(
+      "restaurants",
+      "*",
+      condominiumId ? { condominium_id: condominiumId } : undefined,
+    );
   }
 
   async adminCreateRestaurant(r: Partial<Restaurant>): Promise<Restaurant> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await (supabase as any).from("restaurants").insert(r).select().single();
+    const { data, error } = await (supabase as any)
+      .from("restaurants")
+      .insert(r)
+      .select()
+      .single();
     if (error) throw error;
     return data as Restaurant;
   }
 
-  async adminUpdateRestaurant(id: string, updates: Partial<Restaurant>): Promise<Restaurant> {
+  async adminUpdateRestaurant(
+    id: string,
+    updates: Partial<Restaurant>,
+  ): Promise<Restaurant> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await (supabase as any).from("restaurants").update(updates).eq("id", id).select().single();
+    const { data, error } = await (supabase as any)
+      .from("restaurants")
+      .update(updates)
+      .eq("id", id)
+      .select()
+      .single();
     if (error) throw error;
     return data as Restaurant;
   }
 
   async adminDeleteRestaurant(id: string): Promise<void> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error } = await (supabase as any).from("restaurants").delete().eq("id", id);
+    const { error } = await (supabase as any)
+      .from("restaurants")
+      .delete()
+      .eq("id", id);
     if (error) throw error;
   }
 
   async adminGetAllSports(condominiumId?: number): Promise<Sport[]> {
-    return this.sbFrom<Sport>("sports", "*", condominiumId ? { condominium_id: condominiumId } : undefined);
+    return this.sbFrom<Sport>(
+      "sports",
+      "*",
+      condominiumId ? { condominium_id: condominiumId } : undefined,
+    );
   }
 
   async adminCreateSport(s: Partial<Sport>): Promise<Sport> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await (supabase as any).from("sports").insert(s).select().single();
+    const { data, error } = await (supabase as any)
+      .from("sports")
+      .insert(s)
+      .select()
+      .single();
     if (error) throw error;
     return data as Sport;
   }
 
   async adminUpdateSport(id: string, updates: Partial<Sport>): Promise<Sport> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await (supabase as any).from("sports").update(updates).eq("id", id).select().single();
+    const { data, error } = await (supabase as any)
+      .from("sports")
+      .update(updates)
+      .eq("id", id)
+      .select()
+      .single();
     if (error) throw error;
     return data as Sport;
   }
 
   async adminDeleteSport(id: string): Promise<void> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error } = await (supabase as any).from("sports").delete().eq("id", id);
+    const { error } = await (supabase as any)
+      .from("sports")
+      .delete()
+      .eq("id", id);
     if (error) throw error;
   }
 
   async adminGetAllNews(condominiumId?: number): Promise<CondominiumNews[]> {
-    return this.sbFrom<CondominiumNews>("condominium_news", "*", condominiumId ? { condominium_id: condominiumId } : undefined);
+    return this.sbFrom<CondominiumNews>(
+      "condominium_news",
+      "*",
+      condominiumId ? { condominium_id: condominiumId } : undefined,
+    );
   }
 
-  async adminCreateNews(news: Partial<CondominiumNews>): Promise<CondominiumNews> {
+  async adminCreateNews(
+    news: Partial<CondominiumNews>,
+  ): Promise<CondominiumNews> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await (supabase as any).from("condominium_news").insert(news).select().single();
+    const { data, error } = await (supabase as any)
+      .from("condominium_news")
+      .insert(news)
+      .select()
+      .single();
     if (error) throw error;
     return data as CondominiumNews;
   }
 
-  async adminUpdateNews(id: number, updates: Partial<CondominiumNews>): Promise<CondominiumNews> {
+  async adminUpdateNews(
+    id: number,
+    updates: Partial<CondominiumNews>,
+  ): Promise<CondominiumNews> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await (supabase as any).from("condominium_news").update(updates).eq("id", id).select().single();
+    const { data, error } = await (supabase as any)
+      .from("condominium_news")
+      .update(updates)
+      .eq("id", id)
+      .select()
+      .single();
     if (error) throw error;
     return data as CondominiumNews;
   }
 
   async adminDeleteNews(id: number): Promise<void> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error } = await (supabase as any).from("condominium_news").delete().eq("id", id);
+    const { error } = await (supabase as any)
+      .from("condominium_news")
+      .delete()
+      .eq("id", id);
     if (error) throw error;
   }
 
-  async adminGetAuditLogs(filters?: { condominiumId?: number; limit?: number }): Promise<AuditLog[]> {
+  async adminGetAuditLogs(filters?: {
+    condominiumId?: number;
+    limit?: number;
+  }): Promise<AuditLog[]> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let q = (supabase as any).from("audit_logs").select("*").order("created_at", { ascending: false }).limit(filters?.limit ?? 100);
-    if (filters?.condominiumId) q = q.eq("condominium_id", filters.condominiumId);
+    let q = (supabase as any)
+      .from("audit_logs")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(filters?.limit ?? 100);
+    if (filters?.condominiumId)
+      q = q.eq("condominium_id", filters.condominiumId);
     const { data, error } = await q;
     if (error) throw error;
     return (data ?? []) as AuditLog[];
   }
 
-  async adminGetDeviceRegistrationErrors(condominiumId?: number): Promise<DeviceRegistrationError[]> {
+  async adminGetDeviceRegistrationErrors(
+    condominiumId?: number,
+  ): Promise<DeviceRegistrationError[]> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let q = (supabase as any).from("device_registration_errors").select("*").order("created_at", { ascending: false }).limit(100);
+    let q = (supabase as any)
+      .from("device_registration_errors")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(100);
     if (condominiumId) q = q.eq("condominium_id", condominiumId);
     const { data, error } = await q;
     if (error) throw error;
@@ -1137,9 +1424,15 @@ class DataService {
     return (data ?? []) as CondominiumSubscription[];
   }
 
-  async adminUpdateSubscriptionStatus(id: number, status: string): Promise<void> {
+  async adminUpdateSubscriptionStatus(
+    id: number,
+    status: string,
+  ): Promise<void> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error } = await (supabase as any).from("condominium_subscriptions").update({ status }).eq("id", id);
+    const { error } = await (supabase as any)
+      .from("condominium_subscriptions")
+      .update({ status })
+      .eq("id", id);
     if (error) throw error;
   }
 }
