@@ -1,4 +1,10 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+} from "react";
 import { api } from "@/services/dataService";
 import { logger, LogCategory } from "@/services/logger";
 import type { Staff, UserRole } from "@/types";
@@ -11,7 +17,11 @@ interface AuthState {
 }
 
 interface AuthContextValue extends AuthState {
-  login: (firstName: string, lastName: string, pin: string) => Promise<Staff | null>;
+  login: (
+    firstName: string,
+    lastName: string,
+    pin: string,
+  ) => Promise<Staff | null>;
   logout: () => Promise<void>;
   refreshSession: () => Promise<void>;
   hasRole: (...roles: UserRole[]) => boolean;
@@ -29,12 +39,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const refreshSession = useCallback(async () => {
     try {
-      await api.init();
+      logger.info(LogCategory.AUTH, "refreshSession: api.init start");
+      // Hard timeout so a stuck SQLite/Supabase init doesn't freeze the splash forever.
+      await Promise.race([
+        api.init(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("api.init timeout (8s)")), 8000),
+        ),
+      ]);
+      logger.info(LogCategory.AUTH, "refreshSession: api.init ok");
 
       const [configured, sessionStaff] = await Promise.all([
         api.isDeviceConfigured(),
         api.getSessionStaff(),
       ]);
+      logger.info(LogCategory.AUTH, "refreshSession: session queries ok", {
+        configured,
+        hasStaff: !!sessionStaff,
+      });
 
       if (sessionStaff) {
         logger.setUser({
@@ -62,7 +84,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [refreshSession]);
 
   const login = useCallback(
-    async (firstName: string, lastName: string, pin: string): Promise<Staff | null> => {
+    async (
+      firstName: string,
+      lastName: string,
+      pin: string,
+    ): Promise<Staff | null> => {
       const staff = await api.login(firstName, lastName, pin);
       if (staff) {
         setState((prev) => ({ ...prev, staff }));
@@ -75,7 +101,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       return staff;
     },
-    []
+    [],
   );
 
   const logout = useCallback(async () => {
@@ -89,11 +115,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!state.staff) return false;
       return roles.includes(state.staff.role);
     },
-    [state.staff]
+    [state.staff],
   );
 
   return (
-    <AuthContext.Provider value={{ ...state, login, logout, refreshSession, hasRole }}>
+    <AuthContext.Provider
+      value={{ ...state, login, logout, refreshSession, hasRole }}
+    >
       {children}
     </AuthContext.Provider>
   );

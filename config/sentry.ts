@@ -58,44 +58,55 @@ export function initSentry(): void {
 
   sentryEnabled = enabled;
 
-  Sentry.init({
-    dsn,
-    enabled,
-    debug: __DEV__,
-    tracesSampleRate: 0.2,
-    profilesSampleRate: 0.1,
-    attachStacktrace: true,
-    enableAutoSessionTracking: true,
+  try {
+    Sentry.init({
+      dsn,
+      enabled,
+      debug: __DEV__,
+      tracesSampleRate: 0.2,
+      profilesSampleRate: 0.1,
+      attachStacktrace: true,
+      enableAutoSessionTracking: true,
 
-    integrations: [navigationIntegration],
+      integrations: [navigationIntegration],
 
-    beforeSend(event) {
-      if (event.exception?.values) {
-        event.exception.values = event.exception.values.map((ex) => ({
-          ...ex,
-          value: ex.value ? scrubString(ex.value) : ex.value,
-        }));
-      }
-      if (event.extra) {
-        event.extra = scrubObject(event.extra as Record<string, unknown>);
-      }
-      return event;
-    },
-
-    beforeBreadcrumb(breadcrumb) {
-      if (breadcrumb.message) {
-        breadcrumb.message = scrubString(breadcrumb.message);
-      }
-      if (breadcrumb.data) {
-        const data = breadcrumb.data as Record<string, unknown>;
-        for (const key of PII_KEYS) {
-          if (key in data) delete data[key];
+      beforeSend(event) {
+        if (event.exception?.values) {
+          event.exception.values = event.exception.values.map((ex) => ({
+            ...ex,
+            value: ex.value ? scrubString(ex.value) : ex.value,
+          }));
         }
-        for (const [k, v] of Object.entries(data)) {
-          if (typeof v === "string") data[k] = scrubString(v);
+        if (event.extra) {
+          event.extra = scrubObject(event.extra as Record<string, unknown>);
         }
-      }
-      return breadcrumb;
-    },
-  });
+        return event;
+      },
+
+      beforeBreadcrumb(breadcrumb) {
+        if (breadcrumb.message) {
+          breadcrumb.message = scrubString(breadcrumb.message);
+        }
+        if (breadcrumb.data) {
+          const data = breadcrumb.data as Record<string, unknown>;
+          for (const key of PII_KEYS) {
+            if (key in data) delete data[key];
+          }
+          for (const [k, v] of Object.entries(data)) {
+            if (typeof v === "string") data[k] = scrubString(v);
+          }
+        }
+        return breadcrumb;
+      },
+    });
+
+    Sentry.addBreadcrumb({
+      category: "boot",
+      message: "initSentry completed",
+      level: "info",
+    });
+  } catch (error) {
+    sentryEnabled = false;
+    console.warn("[Sentry] init threw — reporting disabled", error);
+  }
 }
