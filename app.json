@@ -39,7 +39,7 @@
     },
     "web": {
       "output": "single",
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/icon.png"
     },
     "plugins": [
       [
@@ -55,9 +55,9 @@
           "image": "./assets/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#0F172A",
+          "backgroundColor": "#1E40AF",
           "dark": {
-            "backgroundColor": "#0F172A"
+            "backgroundColor": "#1E40AF"
           }
         }
       ],

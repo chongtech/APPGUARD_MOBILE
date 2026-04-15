@@ -1,8 +1,16 @@
 import React, { useEffect, useRef } from "react";
-import { View, Animated, StyleSheet, Dimensions } from "react-native";
-import { AppLogo } from "@/components/AppLogo";
+import {
+  View,
+  Animated,
+  StyleSheet,
+  Dimensions,
+  Easing,
+  Image,
+} from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
+const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
+const LOGO_SIZE = Math.min(SCREEN_W * 0.42, 200);
 
 interface SplashScreenProps {
   onReady?: () => void;
@@ -11,162 +19,210 @@ interface SplashScreenProps {
 /**
  * Premium animated splash screen.
  *
- * Sequence:
- *  1. Logo fades in + scales up from 0.8 → 1.0
- *  2. Title slides up + fades in
- *  3. Subtitle fades in
- *  4. Pulsing glow loop on the logo
- *  5. Calls onReady after the entrance completes
+ * Design: matches the real brand — blue→green gradient of the app icon,
+ * with the actual icon.png rendered centered on a polished diagonal gradient.
+ *
+ * Choreography:
+ *  1. Gradient background + ambient blobs painted instantly
+ *  2. Glow halo blooms in behind the logo
+ *  3. Logo fades in, scales up with spring, then breathes continuously
+ *  4. Tagline fades in below
+ *  5. Shimmer progress bar loops while the app finishes loading
  */
 export function SplashScreen({ onReady }: SplashScreenProps) {
+  const haloOpacity = useRef(new Animated.Value(0)).current;
+  const haloScale = useRef(new Animated.Value(0.6)).current;
   const logoOpacity = useRef(new Animated.Value(0)).current;
-  const logoScale = useRef(new Animated.Value(0.8)).current;
-  const titleOpacity = useRef(new Animated.Value(0)).current;
-  const titleTranslateY = useRef(new Animated.Value(20)).current;
-  const subtitleOpacity = useRef(new Animated.Value(0)).current;
-  const glowOpacity = useRef(new Animated.Value(0)).current;
-  const shimmerTranslate = useRef(new Animated.Value(-SCREEN_WIDTH)).current;
+  const logoScale = useRef(new Animated.Value(0.85)).current;
+  const taglineOpacity = useRef(new Animated.Value(0)).current;
+  const taglineTranslateY = useRef(new Animated.Value(12)).current;
+  const progressOpacity = useRef(new Animated.Value(0)).current;
+  const progressTranslate = useRef(new Animated.Value(-1)).current;
+  const pulseScale = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-    // Entrance sequence
     Animated.sequence([
-      // 1 — Logo entrance
+      // 1 — Halo bloom
+      Animated.parallel([
+        Animated.timing(haloOpacity, {
+          toValue: 1,
+          duration: 550,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.spring(haloScale, {
+          toValue: 1,
+          friction: 7,
+          tension: 28,
+          useNativeDriver: true,
+        }),
+      ]),
+      // 2 — Logo entrance
       Animated.parallel([
         Animated.timing(logoOpacity, {
           toValue: 1,
-          duration: 600,
+          duration: 500,
+          easing: Easing.out(Easing.cubic),
           useNativeDriver: true,
         }),
         Animated.spring(logoScale, {
           toValue: 1,
-          friction: 8,
-          tension: 40,
+          friction: 6,
+          tension: 48,
           useNativeDriver: true,
         }),
       ]),
-      // 2 — Title slide up
+      // 3 — Tagline + progress bar reveal together
       Animated.parallel([
-        Animated.timing(titleOpacity, {
+        Animated.timing(taglineOpacity, {
           toValue: 1,
           duration: 400,
           useNativeDriver: true,
         }),
-        Animated.timing(titleTranslateY, {
+        Animated.timing(taglineTranslateY, {
           toValue: 0,
+          duration: 400,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(progressOpacity, {
+          toValue: 1,
           duration: 400,
           useNativeDriver: true,
         }),
       ]),
-      // 3 — Subtitle
-      Animated.timing(subtitleOpacity, {
-        toValue: 1,
-        duration: 400,
-        useNativeDriver: true,
-      }),
     ]).start(() => {
       onReady?.();
     });
 
-    // Ambient glow loop (runs independently)
+    // Continuous: subtle logo breathing
     Animated.loop(
       Animated.sequence([
-        Animated.timing(glowOpacity, {
-          toValue: 0.6,
-          duration: 1500,
+        Animated.timing(pulseScale, {
+          toValue: 1.035,
+          duration: 1800,
+          easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
-        Animated.timing(glowOpacity, {
-          toValue: 0,
-          duration: 1500,
+        Animated.timing(pulseScale, {
+          toValue: 1,
+          duration: 1800,
+          easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
       ]),
     ).start();
 
-    // Shimmer sweep loop
+    // Continuous: progress bar sweep
     Animated.loop(
-      Animated.timing(shimmerTranslate, {
-        toValue: SCREEN_WIDTH,
-        duration: 2400,
+      Animated.timing(progressTranslate, {
+        toValue: 1,
+        duration: 1600,
+        easing: Easing.inOut(Easing.cubic),
         useNativeDriver: true,
       }),
     ).start();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const progressX = progressTranslate.interpolate({
+    inputRange: [-1, 1],
+    outputRange: [-180, 180],
+  });
+
   return (
     <View style={styles.container}>
-      {/* Subtle gradient dots background */}
-      <View style={styles.bgPattern}>
-        {Array.from({ length: 5 }).map((_, i) => (
-          <View
-            key={i}
-            style={[
-              styles.bgCircle,
-              {
-                top: `${15 + i * 18}%`,
-                left: `${10 + ((i * 37) % 80)}%`,
-                opacity: 0.04 + i * 0.01,
-                width: 120 + i * 40,
-                height: 120 + i * 40,
-                borderRadius: (120 + i * 40) / 2,
-              },
-            ]}
+      {/* Brand gradient: deep blue → emerald green (matches icon) */}
+      <LinearGradient
+        colors={["#1E3A8A", "#1E40AF", "#0D9488", "#059669"]}
+        locations={[0, 0.35, 0.75, 1]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={StyleSheet.absoluteFill}
+      />
+
+      {/* Ambient soft-light blobs for depth */}
+      <View
+        style={[
+          styles.blob,
+          {
+            top: -SCREEN_H * 0.12,
+            left: -SCREEN_W * 0.2,
+            backgroundColor: "#60A5FA",
+            opacity: 0.15,
+          },
+        ]}
+      />
+      <View
+        style={[
+          styles.blob,
+          {
+            bottom: -SCREEN_H * 0.18,
+            right: -SCREEN_W * 0.22,
+            backgroundColor: "#34D399",
+            opacity: 0.16,
+          },
+        ]}
+      />
+
+      {/* Centered hero */}
+      <View style={styles.hero}>
+        {/* Soft halo behind logo */}
+        <Animated.View
+          style={[
+            styles.halo,
+            {
+              opacity: haloOpacity,
+              transform: [{ scale: haloScale }],
+            },
+          ]}
+        />
+
+        {/* Real brand logo */}
+        <Animated.View
+          style={{
+            opacity: logoOpacity,
+            transform: [{ scale: Animated.multiply(logoScale, pulseScale) }],
+            ...styles.logoShadow,
+          }}
+        >
+          <Image
+            source={require("@/assets/icon.png")}
+            style={{
+              width: LOGO_SIZE,
+              height: LOGO_SIZE,
+              borderRadius: LOGO_SIZE * 0.22,
+            }}
+            resizeMode="contain"
           />
-        ))}
+        </Animated.View>
       </View>
 
-      {/* Glow ring behind logo */}
-      <Animated.View style={[styles.glowRing, { opacity: glowOpacity }]} />
-
-      {/* Logo */}
+      {/* Wordmark + tagline */}
       <Animated.View
         style={[
-          styles.logoContainer,
+          styles.taglineWrap,
           {
-            opacity: logoOpacity,
-            transform: [{ scale: logoScale }],
+            opacity: taglineOpacity,
+            transform: [{ translateY: taglineTranslateY }],
           },
         ]}
       >
-        <AppLogo size={140} />
+        <Animated.Text style={styles.wordmark}>EntryFlow</Animated.Text>
+        <View style={styles.divider} />
+        <Animated.Text style={styles.tagline}>
+          Segurança inteligente para condomínios
+        </Animated.Text>
       </Animated.View>
 
-      {/* Title */}
-      <Animated.Text
-        style={[
-          styles.title,
-          {
-            opacity: titleOpacity,
-            transform: [{ translateY: titleTranslateY }],
-          },
-        ]}
-      >
-        EntryFlow
-      </Animated.Text>
-
-      {/* Subtitle with shimmer */}
-      <Animated.View style={{ opacity: subtitleOpacity }}>
-        <View style={styles.subtitleRow}>
-          <View style={styles.subtitleLine} />
-          <Animated.Text style={styles.subtitle}>GUARD</Animated.Text>
-          <View style={styles.subtitleLine} />
-        </View>
-      </Animated.View>
-
-      {/* Bottom tagline */}
-      <Animated.Text style={[styles.tagline, { opacity: subtitleOpacity }]}>
-        Segurança inteligente para condomínios
-      </Animated.Text>
-
-      {/* Loading shimmer bar */}
+      {/* Progress bar */}
       <Animated.View
-        style={[styles.shimmerTrack, { opacity: subtitleOpacity }]}
+        style={[styles.progressTrack, { opacity: progressOpacity }]}
       >
         <Animated.View
           style={[
-            styles.shimmerBar,
-            { transform: [{ translateX: shimmerTranslate }] },
+            styles.progressBar,
+            { transform: [{ translateX: progressX }] },
           ]}
         />
       </Animated.View>
@@ -177,98 +233,89 @@ export function SplashScreen({ onReady }: SplashScreenProps) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#0F172A",
+    backgroundColor: "#1E40AF",
     alignItems: "center",
     justifyContent: "center",
   },
 
-  // Background pattern
-  bgPattern: {
-    ...StyleSheet.absoluteFillObject,
-    overflow: "hidden",
-  },
-  bgCircle: {
+  // Background blobs
+  blob: {
     position: "absolute",
-    backgroundColor: "#0ea5e9",
+    width: SCREEN_W * 0.95,
+    height: SCREEN_W * 0.95,
+    borderRadius: SCREEN_W * 0.475,
   },
 
-  // Glow
-  glowRing: {
+  // Hero stack
+  hero: {
+    alignItems: "center",
+    justifyContent: "center",
+    width: LOGO_SIZE * 2,
+    height: LOGO_SIZE * 2,
+  },
+
+  // Halo behind logo
+  halo: {
     position: "absolute",
-    width: 200,
-    height: 200,
-    borderRadius: 100,
-    backgroundColor: "transparent",
-    borderWidth: 2,
-    borderColor: "#0ea5e9",
-    shadowColor: "#0ea5e9",
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 30,
+    width: LOGO_SIZE * 1.7,
+    height: LOGO_SIZE * 1.7,
+    borderRadius: LOGO_SIZE * 0.85,
+    backgroundColor: "#FFFFFF",
+    opacity: 0.08,
+  },
+
+  // Logo drop shadow
+  logoShadow: {
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.35,
+    shadowRadius: 24,
     elevation: 20,
   },
 
-  // Logo
-  logoContainer: {
-    marginBottom: 24,
-    shadowColor: "#0ea5e9",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 20,
-    elevation: 10,
-  },
-
-  // Typography
-  title: {
-    fontSize: 36,
-    fontWeight: "300",
-    color: "#FFFFFF",
-    letterSpacing: 6,
-    marginBottom: 8,
-  },
-  subtitleRow: {
-    flexDirection: "row",
+  // Wordmark + tagline block
+  taglineWrap: {
+    position: "absolute",
+    bottom: SCREEN_H * 0.18,
     alignItems: "center",
-    gap: 12,
-    marginBottom: 32,
   },
-  subtitleLine: {
-    width: 32,
-    height: 1,
-    backgroundColor: "#0ea5e9",
+  wordmark: {
+    fontSize: 28,
+    color: "#FFFFFF",
+    fontWeight: "700",
+    letterSpacing: 1.5,
+    marginBottom: 10,
+  },
+  divider: {
+    width: 40,
+    height: 2,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 1,
+    marginBottom: 12,
     opacity: 0.5,
   },
-  subtitle: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#0ea5e9",
-    letterSpacing: 8,
-  },
-
-  // Tagline
   tagline: {
-    position: "absolute",
-    bottom: 80,
     fontSize: 13,
-    fontWeight: "400",
-    color: "#64748B",
+    color: "rgba(255, 255, 255, 0.85)",
+    fontWeight: "500",
     letterSpacing: 1,
+    textAlign: "center",
   },
 
-  // Shimmer loading bar
-  shimmerTrack: {
+  // Progress bar
+  progressTrack: {
     position: "absolute",
-    bottom: 48,
-    width: 160,
-    height: 2,
-    backgroundColor: "#1E293B",
-    borderRadius: 1,
+    bottom: SCREEN_H * 0.07,
+    width: 180,
+    height: 3,
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    borderRadius: 2,
     overflow: "hidden",
   },
-  shimmerBar: {
-    width: 60,
-    height: 2,
-    backgroundColor: "#0ea5e9",
-    borderRadius: 1,
+  progressBar: {
+    width: 80,
+    height: 3,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 2,
   },
 });
