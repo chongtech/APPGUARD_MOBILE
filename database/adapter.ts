@@ -69,6 +69,25 @@ function deserializeRow(table: string, row: AnyRow): AnyRow {
   return result;
 }
 
+function toSQLiteBindValue(value: unknown): SQLiteBindValue {
+  if (value === null || value === undefined) return null;
+  if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    value instanceof Uint8Array
+  ) {
+    return value;
+  }
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  if (typeof value === "object") {
+    return JSON.stringify(value);
+  }
+  return String(value);
+}
+
 /** Strip keys that don't exist as columns in the target table.
  *  Supabase RPCs may return joined/nested fields that have no SQLite column —
  *  inserting them would either crash (objects) or create phantom columns. */
@@ -99,7 +118,7 @@ function buildInsertOrReplace(
   const keys = Object.keys(row);
   const placeholders = keys.map(() => "?").join(", ");
   const sql = `INSERT OR REPLACE INTO ${table} (${keys.join(", ")}) VALUES (${placeholders})`;
-  const params = keys.map((k) => (row[k] ?? null) as SQLiteBindValue);
+  const params = keys.map((k) => toSQLiteBindValue(row[k]));
   return { sql, params };
 }
 
@@ -137,7 +156,7 @@ export class TableAdapter<T = AnyRow> {
     const db = await getDb();
     const row = await db.getFirstAsync<AnyRow>(
       `SELECT * FROM ${this.table} WHERE id = ?`,
-      [id as SQLiteBindValue],
+      [toSQLiteBindValue(id)],
     );
     if (!row) return undefined;
     return deserializeRow(this.table, row) as unknown as T;
@@ -167,7 +186,7 @@ export class TableAdapter<T = AnyRow> {
   async delete(id: string | number): Promise<void> {
     const db = await getDb();
     await db.runAsync(`DELETE FROM ${this.table} WHERE id = ?`, [
-      id as SQLiteBindValue,
+      toSQLiteBindValue(id),
     ]);
   }
 
@@ -179,7 +198,7 @@ export class TableAdapter<T = AnyRow> {
           const db = await getDb();
           const rows = await db.getAllAsync<AnyRow>(
             `SELECT * FROM ${table} WHERE ${field} = ?`,
-            [value as SQLiteBindValue],
+            [toSQLiteBindValue(value)],
           );
           return rows.map(
             (r: AnyRow) => deserializeRow(table, r) as unknown as T,
@@ -189,20 +208,19 @@ export class TableAdapter<T = AnyRow> {
           const db = await getDb();
           const result = await db.getFirstAsync<{ count: number }>(
             `SELECT COUNT(*) as count FROM ${table} WHERE ${field} = ?`,
-            [value as SQLiteBindValue],
+            [toSQLiteBindValue(value)],
           );
           return result?.count ?? 0;
         },
         modify: async (changes: Partial<T>): Promise<void> => {
           const db = await getDb();
-          const keys = Object.keys(changes as AnyRow);
+          const serialized = serializeRow(table, changes as AnyRow);
+          const keys = Object.keys(serialized);
           if (keys.length === 0) return;
           const setParts = keys.map((k) => `${k} = ?`).join(", ");
           const params: Binds = [
-            ...keys.map(
-              (k) => ((changes as AnyRow)[k] ?? null) as SQLiteBindValue,
-            ),
-            value as SQLiteBindValue,
+            ...keys.map((k) => toSQLiteBindValue(serialized[k])),
+            toSQLiteBindValue(value),
           ];
           await db.runAsync(
             `UPDATE ${table} SET ${setParts} WHERE ${field} = ?`,
@@ -212,7 +230,7 @@ export class TableAdapter<T = AnyRow> {
         delete: async (): Promise<void> => {
           const db = await getDb();
           await db.runAsync(`DELETE FROM ${table} WHERE ${field} = ?`, [
-            value as SQLiteBindValue,
+            toSQLiteBindValue(value),
           ]);
         },
       }),
@@ -221,7 +239,7 @@ export class TableAdapter<T = AnyRow> {
           const db = await getDb();
           const rows = await db.getAllAsync<AnyRow>(
             `SELECT * FROM ${table} WHERE ${field} > ?`,
-            [value as SQLiteBindValue],
+            [toSQLiteBindValue(value)],
           );
           return rows.map(
             (r: AnyRow) => deserializeRow(table, r) as unknown as T,

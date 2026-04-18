@@ -25,9 +25,14 @@ import { useTheme } from "@/hooks/useTheme";
 initSentry();
 
 // Positive-signal beacon: confirms the JS bundle executed on-device.
-// Absence of this message in Sentry after a crashed launch means the failure
+// Absence of this event in Sentry after a crashed launch means the failure
 // is in native init (before JS runs).
-Sentry.captureMessage("boot:js-started", "info");
+Sentry.captureEvent({
+  level: "info",
+  logger: "boot",
+  message: "boot:js-started",
+  tags: { phase: "js-started" },
+});
 
 // Catch async/unhandled JS errors that slip past React's ErrorBoundary.
 type ErrorUtilsGlobal = {

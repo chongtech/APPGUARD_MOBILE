@@ -2,6 +2,7 @@ import * as Sentry from "@sentry/react-native";
 
 export { Sentry };
 let sentryEnabled = false;
+let sentryInitialized = false;
 
 // Navigation integration ref — pass to NavigationContainer via ref prop
 export const navigationIntegration = Sentry.reactNavigationIntegration({
@@ -43,8 +44,13 @@ export function initSentry(): void {
   const enableInDev = process.env.EXPO_PUBLIC_SENTRY_ENABLE_DEV === "true";
   const enabled = !__DEV__ || enableInDev;
 
+  if (sentryInitialized) {
+    return;
+  }
+
   if (!dsn) {
     sentryEnabled = false;
+    sentryInitialized = false;
     if (__DEV__)
       console.warn("[Sentry] EXPO_PUBLIC_SENTRY_DSN not set — Sentry disabled");
     return;
@@ -55,8 +61,6 @@ export function initSentry(): void {
       "[Sentry] Running in development — remote reporting disabled. Set EXPO_PUBLIC_SENTRY_ENABLE_DEV=true to test Sentry locally.",
     );
   }
-
-  sentryEnabled = enabled;
 
   try {
     Sentry.init({
@@ -100,6 +104,8 @@ export function initSentry(): void {
       },
     });
 
+    sentryInitialized = true;
+    sentryEnabled = enabled;
     Sentry.addBreadcrumb({
       category: "boot",
       message: "initSentry completed",

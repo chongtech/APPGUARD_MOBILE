@@ -4935,3 +4935,134 @@ ON public.resident_qr_codes (resident_id, status, expires_at);
 
 CREATE INDEX IF NOT EXISTS idx_incidents_resident_reported_at
 ON public.incidents (resident_id, reported_at DESC);
+
+
+CREATE OR REPLACE FUNCTION public.upsert_frequent_visitor(
+  p_resident_id integer,
+  p_name text,
+  p_phone text,
+  p_purpose text DEFAULT 'guest',
+  p_notes text DEFAULT NULL
+)
+ RETURNS uuid
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+AS $function$
+DECLARE
+  v_id uuid;
+BEGIN
+  INSERT INTO public.resident_frequent_visitors (resident_id, name, phone, purpose, notes)
+  VALUES (p_resident_id, p_name, p_phone, p_purpose, p_notes)
+  ON CONFLICT (resident_id, phone)
+  DO UPDATE SET
+    name = EXCLUDED.name,
+    purpose = EXCLUDED.purpose,
+    notes = COALESCE(EXCLUDED.notes, resident_frequent_visitors.notes),
+    updated_at = now()
+  RETURNING id INTO v_id;
+  RETURN v_id;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.increment_frequent_visitor_usage(
+  p_resident_id integer,
+  p_phone text
+)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+AS $function$
+BEGIN
+  UPDATE public.resident_frequent_visitors
+  SET use_count = use_count + 1,
+      last_used_at = now(),
+      updated_at = now()
+  WHERE resident_id = p_resident_id AND phone = p_phone;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.delete_frequent_visitor(
+  p_id uuid,
+  p_resident_id integer
+)
+ RETURNS boolean
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+AS $function$
+BEGIN
+  DELETE FROM public.resident_frequent_visitors
+  WHERE id = p_id AND resident_id = p_resident_id;
+  RETURN FOUND;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.update_frequent_visitor(
+  p_id uuid,
+  p_resident_id integer,
+  p_name text DEFAULT NULL,
+  p_phone text DEFAULT NULL,
+  p_purpose text DEFAULT NULL,
+  p_notes text DEFAULT NULL
+)
+ RETURNS SETOF resident_frequent_visitors
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+AS $function$
+BEGIN
+  RETURN QUERY
+  UPDATE public.resident_frequent_visitors
+  SET
+    name = COALESCE(p_name, name),
+    phone = COALESCE(p_phone, phone),
+    purpose = COALESCE(p_purpose, purpose),
+    notes = COALESCE(p_notes, notes),
+    updated_at = now()
+  WHERE id = p_id AND resident_id = p_resident_id
+  RETURNING *;
+END;
+$function$;
+
+CREATE TABLE IF NOT EXISTS public.resident_frequent_visitors (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  resident_id integer NOT NULL REFERENCES public.residents(id) ON DELETE CASCADE,
+  name text NOT NULL,
+  phone text NOT NULL,
+  purpose text DEFAULT 'guest' CHECK (purpose IN ('guest', 'delivery', 'service', 'other')),
+  notes text,
+  avatar_url text,
+  use_count integer DEFAULT 0,
+  last_used_at timestamp with time zone,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_frequent_visitors_resident_id
+  ON public.resident_frequent_visitors(resident_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_frequent_visitors_unique
+  ON public.resident_frequent_visitors(resident_id, phone);
+
+CREATE OR REPLACE FUNCTION public.get_frequent_visitors(p_resident_id integer)
+ RETURNS TABLE(
+   id uuid,
+   name text,
+   phone text,
+   purpose text,
+   notes text,
+   avatar_url text,
+   use_count integer,
+   last_used_at timestamptz,
+   created_at timestamptz
+ )
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+AS $function$
+BEGIN
+  RETURN QUERY
+  SELECT fv.id, fv.name, fv.phone, fv.purpose, fv.notes, fv.avatar_url,
+    fv.use_count, fv.last_used_at, fv.created_at
+  FROM public.resident_frequent_visitors fv
+  WHERE fv.resident_id = p_resident_id
+  ORDER BY fv.use_count DESC, fv.last_used_at DESC NULLS LAST;
+END;
+$function$;
