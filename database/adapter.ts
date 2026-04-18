@@ -7,6 +7,23 @@
  */
 import { getDb } from "@/database/db";
 import type { SQLiteBindValue } from "expo-sqlite";
+import type {
+  Visit,
+  VisitEvent,
+  Unit,
+  VisitTypeConfig,
+  ServiceTypeConfig,
+  Staff,
+  Condominium,
+  Restaurant,
+  Sport,
+  Incident,
+  IncidentType,
+  IncidentStatus,
+  Device,
+  Resident,
+  CondominiumNews,
+} from "@/types";
 
 type AnyRow = Record<string, unknown>;
 type Binds = SQLiteBindValue[];
@@ -17,11 +34,21 @@ const JSON_COLUMNS: Record<string, string[]> = {
 };
 
 function serializeRow(table: string, row: AnyRow): AnyRow {
-  const jsonCols = JSON_COLUMNS[table] ?? [];
   const result = { ...row };
-  for (const col of jsonCols) {
-    if (result[col] !== undefined && result[col] !== null && typeof result[col] !== "string") {
-      result[col] = JSON.stringify(result[col]);
+  for (const [key, value] of Object.entries(result)) {
+    if (value === null || value === undefined) continue;
+    // Known JSON columns — always stringify
+    if (JSON_COLUMNS[table]?.includes(key)) {
+      if (typeof value !== "string") {
+        result[key] = JSON.stringify(value);
+      }
+      continue;
+    }
+    // Safety net: any remaining object/array value must be stringified or it
+    // will crash expo-sqlite's Kotlin bridge with:
+    //   "Cannot convert '[object Object]' to a Kotlin type"
+    if (typeof value === "object") {
+      result[key] = JSON.stringify(value);
     }
   }
   return result;
@@ -42,9 +69,32 @@ function deserializeRow(table: string, row: AnyRow): AnyRow {
   return result;
 }
 
+/** Strip keys that don't exist as columns in the target table.
+ *  Supabase RPCs may return joined/nested fields that have no SQLite column —
+ *  inserting them would either crash (objects) or create phantom columns. */
+const TABLE_COLUMNS: Record<string, Set<string>> = {};
+async function filterToTableColumns(
+  table: string,
+  row: AnyRow,
+): Promise<AnyRow> {
+  if (!TABLE_COLUMNS[table]) {
+    const d = await getDb();
+    const cols = await d.getAllAsync<{ name: string }>(
+      `PRAGMA table_info(${table})`,
+    );
+    TABLE_COLUMNS[table] = new Set(cols.map((c) => c.name));
+  }
+  const allowed = TABLE_COLUMNS[table];
+  const filtered: AnyRow = {};
+  for (const key of Object.keys(row)) {
+    if (allowed.has(key)) filtered[key] = row[key];
+  }
+  return filtered;
+}
+
 function buildInsertOrReplace(
   table: string,
-  row: AnyRow
+  row: AnyRow,
 ): { sql: string; params: Binds } {
   const keys = Object.keys(row);
   const placeholders = keys.map(() => "?").join(", ");
@@ -53,13 +103,16 @@ function buildInsertOrReplace(
   return { sql, params };
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export class TableAdapter<T = any> {
+export class TableAdapter<T = AnyRow> {
   constructor(private table: string) {}
 
   async put(record: T): Promise<void> {
     const db = await getDb();
-    const serialized = serializeRow(this.table, record as unknown as AnyRow);
+    const filtered = await filterToTableColumns(
+      this.table,
+      record as unknown as AnyRow,
+    );
+    const serialized = serializeRow(this.table, filtered);
     const { sql, params } = buildInsertOrReplace(this.table, serialized);
     await db.runAsync(sql, params);
   }
@@ -69,7 +122,11 @@ export class TableAdapter<T = any> {
     const db = await getDb();
     await db.withTransactionAsync(async () => {
       for (const record of records) {
-        const serialized = serializeRow(this.table, record as unknown as AnyRow);
+        const filtered = await filterToTableColumns(
+          this.table,
+          record as unknown as AnyRow,
+        );
+        const serialized = serializeRow(this.table, filtered);
         const { sql, params } = buildInsertOrReplace(this.table, serialized);
         await db.runAsync(sql, params);
       }
@@ -80,7 +137,7 @@ export class TableAdapter<T = any> {
     const db = await getDb();
     const row = await db.getFirstAsync<AnyRow>(
       `SELECT * FROM ${this.table} WHERE id = ?`,
-      [id as SQLiteBindValue]
+      [id as SQLiteBindValue],
     );
     if (!row) return undefined;
     return deserializeRow(this.table, row) as unknown as T;
@@ -89,13 +146,15 @@ export class TableAdapter<T = any> {
   async toArray(): Promise<T[]> {
     const db = await getDb();
     const rows = await db.getAllAsync<AnyRow>(`SELECT * FROM ${this.table}`);
-    return rows.map((r: AnyRow) => deserializeRow(this.table, r) as unknown as T);
+    return rows.map(
+      (r: AnyRow) => deserializeRow(this.table, r) as unknown as T,
+    );
   }
 
   async count(): Promise<number> {
     const db = await getDb();
     const result = await db.getFirstAsync<{ count: number }>(
-      `SELECT COUNT(*) as count FROM ${this.table}`
+      `SELECT COUNT(*) as count FROM ${this.table}`,
     );
     return result?.count ?? 0;
   }
@@ -107,7 +166,9 @@ export class TableAdapter<T = any> {
 
   async delete(id: string | number): Promise<void> {
     const db = await getDb();
-    await db.runAsync(`DELETE FROM ${this.table} WHERE id = ?`, [id as SQLiteBindValue]);
+    await db.runAsync(`DELETE FROM ${this.table} WHERE id = ?`, [
+      id as SQLiteBindValue,
+    ]);
   }
 
   where(field: string) {
@@ -118,15 +179,17 @@ export class TableAdapter<T = any> {
           const db = await getDb();
           const rows = await db.getAllAsync<AnyRow>(
             `SELECT * FROM ${table} WHERE ${field} = ?`,
-            [value as SQLiteBindValue]
+            [value as SQLiteBindValue],
           );
-          return rows.map((r: AnyRow) => deserializeRow(table, r) as unknown as T);
+          return rows.map(
+            (r: AnyRow) => deserializeRow(table, r) as unknown as T,
+          );
         },
         count: async (): Promise<number> => {
           const db = await getDb();
           const result = await db.getFirstAsync<{ count: number }>(
             `SELECT COUNT(*) as count FROM ${table} WHERE ${field} = ?`,
-            [value as SQLiteBindValue]
+            [value as SQLiteBindValue],
           );
           return result?.count ?? 0;
         },
@@ -136,17 +199,21 @@ export class TableAdapter<T = any> {
           if (keys.length === 0) return;
           const setParts = keys.map((k) => `${k} = ?`).join(", ");
           const params: Binds = [
-            ...keys.map((k) => ((changes as AnyRow)[k] ?? null) as SQLiteBindValue),
+            ...keys.map(
+              (k) => ((changes as AnyRow)[k] ?? null) as SQLiteBindValue,
+            ),
             value as SQLiteBindValue,
           ];
           await db.runAsync(
             `UPDATE ${table} SET ${setParts} WHERE ${field} = ?`,
-            params
+            params,
           );
         },
         delete: async (): Promise<void> => {
           const db = await getDb();
-          await db.runAsync(`DELETE FROM ${table} WHERE ${field} = ?`, [value as SQLiteBindValue]);
+          await db.runAsync(`DELETE FROM ${table} WHERE ${field} = ?`, [
+            value as SQLiteBindValue,
+          ]);
         },
       }),
       above: (value: unknown) => ({
@@ -154,9 +221,11 @@ export class TableAdapter<T = any> {
           const db = await getDb();
           const rows = await db.getAllAsync<AnyRow>(
             `SELECT * FROM ${table} WHERE ${field} > ?`,
-            [value as SQLiteBindValue]
+            [value as SQLiteBindValue],
           );
-          return rows.map((r: AnyRow) => deserializeRow(table, r) as unknown as T);
+          return rows.map(
+            (r: AnyRow) => deserializeRow(table, r) as unknown as T,
+          );
         },
       }),
       startsWith: (prefix: string) => ({
@@ -164,9 +233,11 @@ export class TableAdapter<T = any> {
           const db = await getDb();
           const rows = await db.getAllAsync<AnyRow>(
             `SELECT * FROM ${table} WHERE ${field} LIKE ?`,
-            [`${prefix}%`]
+            [`${prefix}%`],
           );
-          return rows.map((r: AnyRow) => deserializeRow(table, r) as unknown as T);
+          return rows.map(
+            (r: AnyRow) => deserializeRow(table, r) as unknown as T,
+          );
         },
       }),
     };
@@ -175,27 +246,11 @@ export class TableAdapter<T = any> {
   async rawQuery(sql: string, params?: unknown[]): Promise<T[]> {
     const db = await getDb();
     const rows = await db.getAllAsync<AnyRow>(sql, (params ?? []) as Binds);
-    return rows.map((r: AnyRow) => deserializeRow(this.table, r) as unknown as T);
+    return rows.map(
+      (r: AnyRow) => deserializeRow(this.table, r) as unknown as T,
+    );
   }
 }
-
-import type {
-  Visit,
-  VisitEvent,
-  Unit,
-  VisitTypeConfig,
-  ServiceTypeConfig,
-  Staff,
-  Condominium,
-  Restaurant,
-  Sport,
-  Incident,
-  IncidentType,
-  IncidentStatus,
-  Device,
-  Resident,
-  CondominiumNews,
-} from "@/types";
 
 export const db = {
   visits: new TableAdapter<Visit>("visits"),

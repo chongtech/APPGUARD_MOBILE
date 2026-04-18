@@ -38,20 +38,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   });
 
   const refreshSession = useCallback(async () => {
-    try {
-      logger.info(LogCategory.AUTH, "refreshSession: api.init start");
-      // Hard timeout so a stuck SQLite/Supabase init doesn't freeze the splash forever.
-      await Promise.race([
-        api.init(),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("api.init timeout (8s)")), 8000),
+    const withTimeout = <T,>(
+      label: string,
+      p: Promise<T>,
+      ms: number,
+      fallback: T,
+    ): Promise<T> =>
+      Promise.race([
+        p,
+        new Promise<T>((resolve) =>
+          setTimeout(() => {
+            logger.warn(LogCategory.AUTH, `${label} timeout (${ms}ms)`);
+            resolve(fallback);
+          }, ms),
         ),
       ]);
+
+    try {
+      logger.info(LogCategory.AUTH, "refreshSession: api.init start");
+      await withTimeout("api.init", api.init(), 5000, undefined);
       logger.info(LogCategory.AUTH, "refreshSession: api.init ok");
 
       const [configured, sessionStaff] = await Promise.all([
-        api.isDeviceConfigured(),
-        api.getSessionStaff(),
+        withTimeout(
+          "isDeviceConfigured",
+          api.isDeviceConfigured(),
+          4000,
+          false,
+        ),
+        withTimeout<Staff | null>(
+          "getSessionStaff",
+          api.getSessionStaff(),
+          4000,
+          null,
+        ),
       ]);
       logger.info(LogCategory.AUTH, "refreshSession: session queries ok", {
         configured,
@@ -74,7 +94,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
     } catch (error) {
       logger.error(LogCategory.AUTH, "refreshSession failed", error);
-      setState((prev) => ({ ...prev, isLoading: false }));
+      // Always release the splash — fall through to AuthNavigator so the user
+      // can reach setup/login instead of being stuck on the loading state.
+      setState({
+        staff: null,
+        isLoading: false,
+        isDeviceConfigured: false,
+        condominiumId: null,
+      });
     }
   }, []);
 

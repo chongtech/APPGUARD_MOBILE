@@ -4833,3 +4833,105 @@ CREATE OR REPLACE FUNCTION public.word_similarity_op(text, text)
  STABLE PARALLEL SAFE STRICT
 AS '$libdir/pg_trgm', $function$word_similarity_op$function$
 ;
+
+CREATE OR REPLACE FUNCTION public.get_resident_stats(
+  p_resident_id integer,
+  p_unit_id integer,
+  p_period text DEFAULT 'month'    -- 'week' | 'month' | 'year' | 'all'
+)
+ RETURNS TABLE(
+   period_label text,
+   visits_total integer,
+   visits_approved integer,
+   visits_denied integer,
+   visits_by_type jsonb,
+   qr_codes_generated integer,
+   qr_codes_active integer,
+   incidents_reported integer,
+   top_visitors jsonb,
+   busiest_day_of_week text,
+   busiest_hour integer,
+   prev_period_visits integer
+ )
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_start timestamptz;
+  v_end timestamptz := now();
+  v_prev_start timestamptz;
+  v_prev_end timestamptz;
+BEGIN
+  CASE p_period
+    WHEN 'week' THEN
+      v_start := date_trunc('week', now());
+      v_prev_start := v_start - interval '1 week';
+      v_prev_end := v_start;
+    WHEN 'month' THEN
+      v_start := date_trunc('month', now());
+      v_prev_start := v_start - interval '1 month';
+      v_prev_end := v_start;
+    WHEN 'year' THEN
+      v_start := date_trunc('year', now());
+      v_prev_start := v_start - interval '1 year';
+      v_prev_end := v_start;
+    ELSE
+      v_start := '1970-01-01'::timestamptz;
+      v_prev_start := v_start;
+      v_prev_end := v_start;
+  END CASE;
+
+  RETURN QUERY
+  SELECT
+    p_period,
+    (SELECT COUNT(*)::integer FROM visits WHERE unit_id = p_unit_id AND created_at >= v_start),
+    (SELECT COUNT(*)::integer FROM visits WHERE unit_id = p_unit_id AND created_at >= v_start AND status = 'AUTORIZADO'),
+    (SELECT COUNT(*)::integer FROM visits WHERE unit_id = p_unit_id AND created_at >= v_start AND status = 'NEGADO'),
+    (SELECT COALESCE(jsonb_object_agg(type_name, cnt), '{}'::jsonb) FROM
+      (SELECT vt.name AS type_name, COUNT(*)::integer AS cnt
+       FROM visits v
+       LEFT JOIN visit_types vt ON v.visit_type_id = vt.id
+       WHERE v.unit_id = p_unit_id AND v.created_at >= v_start
+       GROUP BY vt.name) sub),
+    (SELECT COUNT(*)::integer FROM resident_qr_codes WHERE resident_id = p_resident_id AND created_at >= v_start),
+    (SELECT COUNT(*)::integer
+     FROM resident_qr_codes
+     WHERE resident_id = p_resident_id
+       AND status = 'active'
+       AND (expires_at IS NULL OR expires_at > NOW())),
+    (SELECT COUNT(*)::integer FROM incidents WHERE resident_id = p_resident_id AND reported_at >= v_start),
+    (SELECT COALESCE(jsonb_agg(jsonb_build_object('name', visitor_name, 'phone', visitor_phone, 'count', cnt)), '[]'::jsonb)
+     FROM (SELECT visitor_name, visitor_phone, COUNT(*)::integer AS cnt
+           FROM visits
+           WHERE unit_id = p_unit_id AND created_at >= v_start AND visitor_name IS NOT NULL
+           GROUP BY visitor_name, visitor_phone
+           ORDER BY cnt DESC LIMIT 5) top),
+    (SELECT TO_CHAR(created_at, 'FMDay') FROM visits
+     WHERE unit_id = p_unit_id AND created_at >= v_start
+     GROUP BY TO_CHAR(created_at, 'FMDay')
+     ORDER BY COUNT(*) DESC LIMIT 1),
+    (SELECT EXTRACT(HOUR FROM created_at)::integer FROM visits
+     WHERE unit_id = p_unit_id AND created_at >= v_start
+     GROUP BY EXTRACT(HOUR FROM created_at)
+     ORDER BY COUNT(*) DESC LIMIT 1),
+    (SELECT COUNT(*)::integer FROM visits
+     WHERE unit_id = p_unit_id AND created_at >= v_prev_start AND created_at < v_prev_end);
+END;
+$function$;
+
+
+CREATE INDEX IF NOT EXISTS idx_visits_unit_created_at
+ON public.visits (unit_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_visits_unit_created_status
+ON public.visits (unit_id, created_at DESC, status);
+
+CREATE INDEX IF NOT EXISTS idx_resident_qr_codes_resident_created_at
+ON public.resident_qr_codes (resident_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_resident_qr_codes_resident_status_expires
+ON public.resident_qr_codes (resident_id, status, expires_at);
+
+CREATE INDEX IF NOT EXISTS idx_incidents_resident_reported_at
+ON public.incidents (resident_id, reported_at DESC);

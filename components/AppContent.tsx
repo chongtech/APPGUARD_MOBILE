@@ -11,7 +11,7 @@ import { ErrorFallback } from "@/components/ErrorFallback";
 // Swallow the promise — if this API rejects, it must not block the JS splash from hiding.
 ExpoSplashScreen.preventAutoHideAsync().catch(() => {});
 
-const BOOT_WATCHDOG_MS = 10_000;
+const BOOT_WATCHDOG_MS = 15_000;
 
 async function forceHideNativeSplash(): Promise<void> {
   try {
@@ -23,15 +23,25 @@ async function forceHideNativeSplash(): Promise<void> {
 
 export function AppContent() {
   const { staff, isLoading, isDeviceConfigured } = useAuth();
+  const [animationDone, setAnimationDone] = useState(false);
   const [splashDone, setSplashDone] = useState(false);
   const [bootStuck, setBootStuck] = useState<Error | null>(null);
 
-  const handleSplashReady = useCallback(async () => {
-    await forceHideNativeSplash();
-    setSplashDone(true);
+  // The splash animation calls onReady exactly once when its sequence finishes.
+  // We track that independently from auth loading so the two don't race.
+  const handleAnimationDone = useCallback(() => {
+    setAnimationDone(true);
   }, []);
 
-  // Boot watchdog — if the splash hasn't advanced after 10s, self-report to Sentry,
+  // Transition: when BOTH the animation has finished AND auth is done loading,
+  // hide the native splash and move to the real app.
+  useEffect(() => {
+    if (animationDone && !isLoading && !splashDone) {
+      void forceHideNativeSplash().then(() => setSplashDone(true));
+    }
+  }, [animationDone, isLoading, splashDone]);
+
+  // Boot watchdog — if the splash hasn't advanced after 15s, self-report to Sentry,
   // force-hide the native splash, and fall back to the error UI so the user isn't frozen.
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -41,11 +51,10 @@ export function AppContent() {
       });
       flushSentry(2000);
       void forceHideNativeSplash();
-      setBootStuck(new Error("Boot watchdog: splash stuck for 10s"));
+      setBootStuck(new Error("Boot watchdog: splash stuck for 15s"));
     }, BOOT_WATCHDOG_MS);
 
     return () => clearTimeout(timer);
-    // Run once on mount — we want this to fire if state is stuck, not re-arm on every change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -55,10 +64,8 @@ export function AppContent() {
     );
   }
 
-  if (isLoading || !splashDone) {
-    return (
-      <SplashScreen onReady={!isLoading ? handleSplashReady : undefined} />
-    );
+  if (!splashDone) {
+    return <SplashScreen onReady={handleAnimationDone} />;
   }
 
   if (!isDeviceConfigured || !staff) {
