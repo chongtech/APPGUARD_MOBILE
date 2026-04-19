@@ -44,6 +44,8 @@ export function AppContent() {
   // Boot watchdog — if the splash hasn't advanced after 15s, self-report to Sentry,
   // force-hide the native splash, and fall back to the error UI so the user isn't frozen.
   useEffect(() => {
+    if (splashDone || bootStuck) return;
+
     const timer = setTimeout(() => {
       Sentry.captureMessage("boot:splash-stuck", {
         level: "error",
@@ -55,8 +57,7 @@ export function AppContent() {
     }, BOOT_WATCHDOG_MS);
 
     return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [bootStuck, isDeviceConfigured, isLoading, splashDone, staff]);
 
   if (bootStuck) {
     return (
