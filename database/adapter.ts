@@ -71,20 +71,13 @@ function deserializeRow(table: string, row: AnyRow): AnyRow {
 
 function toSQLiteBindValue(value: unknown): SQLiteBindValue {
   if (value === null || value === undefined) return null;
-  if (
-    typeof value === "string" ||
-    typeof value === "number" ||
-    typeof value === "boolean" ||
-    value instanceof Uint8Array
-  ) {
-    return value;
-  }
-  if (value instanceof Date) {
-    return value.toISOString();
-  }
-  if (typeof value === "object") {
-    return JSON.stringify(value);
-  }
+  if (typeof value === "string" || typeof value === "number") return value;
+  if (value instanceof Uint8Array) return value;
+  // SQLite has no boolean type — convert to INTEGER 0/1.
+  if (typeof value === "boolean") return value ? 1 : 0;
+  if (value instanceof Date) return value.toISOString();
+  // Any remaining object/array — stringify to prevent Kotlin bridge crash.
+  if (typeof value === "object") return JSON.stringify(value);
   return String(value);
 }
 
@@ -127,6 +120,7 @@ export class TableAdapter<T = AnyRow> {
 
   async put(record: T): Promise<void> {
     const db = await getDb();
+    // Filter + serialize BEFORE touching the DB to avoid async issues inside transactions.
     const filtered = await filterToTableColumns(
       this.table,
       record as unknown as AnyRow,
@@ -139,14 +133,18 @@ export class TableAdapter<T = AnyRow> {
   async bulkPut(records: T[]): Promise<void> {
     if (records.length === 0) return;
     const db = await getDb();
+    // Prepare ALL statements before the transaction — no async inside withTransactionAsync.
+    const statements: { sql: string; params: Binds }[] = [];
+    for (const record of records) {
+      const filtered = await filterToTableColumns(
+        this.table,
+        record as unknown as AnyRow,
+      );
+      const serialized = serializeRow(this.table, filtered);
+      statements.push(buildInsertOrReplace(this.table, serialized));
+    }
     await db.withTransactionAsync(async () => {
-      for (const record of records) {
-        const filtered = await filterToTableColumns(
-          this.table,
-          record as unknown as AnyRow,
-        );
-        const serialized = serializeRow(this.table, filtered);
-        const { sql, params } = buildInsertOrReplace(this.table, serialized);
+      for (const { sql, params } of statements) {
         await db.runAsync(sql, params);
       }
     });
