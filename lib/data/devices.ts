@@ -1,4 +1,4 @@
-import { callRpc } from "@/lib/data/rpc";
+import { callRpc, callRpcFirst } from "@/lib/data/rpc";
 import type { Device } from "@/types";
 
 export async function registerDevice(params: {
@@ -22,19 +22,17 @@ export async function registerDevice(params: {
 
 export async function updateDeviceHeartbeat(params: {
   deviceIdentifier: string;
-  condominiumId: number;
 }): Promise<void> {
   await callRpc<void>("update_device_heartbeat", {
-    p_device_identifier: params.deviceIdentifier,
-    p_condominium_id: params.condominiumId,
+    p_identifier: params.deviceIdentifier,
   });
 }
 
 export async function getDeviceByIdentifier(
   deviceIdentifier: string,
 ): Promise<Device | null> {
-  return callRpc<Device | null>("get_device_by_identifier", {
-    p_device_identifier: deviceIdentifier,
+  return callRpcFirst<Device>("get_device", {
+    p_identifier: deviceIdentifier,
   });
 }
 

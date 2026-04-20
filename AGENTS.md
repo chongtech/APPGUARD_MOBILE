@@ -192,6 +192,7 @@ npm run web
 
 # Linting / formatting
 npm run lint
+npm run check:rpcs
 npm run check:format
 npm run format
 
@@ -204,6 +205,7 @@ eas build --profile production
 Notes for agents:
 
 - `npm run lint` is the main repository-level verification command
+- `npm run check:rpcs` verifies that app RPC calls match `database/migrations/all_rpcs.sql`
 - there is no dedicated automated test script in `package.json` at the moment
 
 ## Key Patterns
@@ -218,6 +220,9 @@ import { api } from "@/services/dataService";
 const visits = await api.getTodaysVisits();
 await api.createVisit(visitData);
 ```
+
+For database functions, call them only through `lib/data/rpc.ts`, `lib/data/*`, or `services/dataService.ts`.
+Do not use `.rpc(...)` directly in screens or components.
 
 ### Using Theme
 
@@ -282,4 +287,5 @@ Before finishing work in this repository, verify the relevant items:
 - New backend usage still goes through `services/dataService.ts` or `lib/data/*`.
 - User-facing text remains in Portuguese.
 - Auth changes still respect PIN-based kiosk behavior and `persistSession: false`.
+- `npm run check:rpcs` passes when RPC code or SQL signatures change.
 - `npm run lint` passes when code changes are made.

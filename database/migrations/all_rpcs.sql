@@ -758,9 +758,9 @@ $function$
 ;
 
 -- ----------------------------------------
--- Function: admin_get_all_news
+-- Function: admin_get_all_news_legacy
 -- ----------------------------------------
-CREATE OR REPLACE FUNCTION public.admin_get_all_news(p_condominium_id integer DEFAULT NULL::integer)
+CREATE OR REPLACE FUNCTION public.admin_get_all_news_legacy(p_condominium_id integer DEFAULT NULL::integer)
  RETURNS SETOF condominium_news
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -1058,9 +1058,9 @@ $function$
 ;
 
 -- ----------------------------------------
--- Function: admin_get_condominium_subscriptions
+-- Function: admin_get_condominium_subscriptions_with_alerts_sent
 -- ----------------------------------------
-CREATE OR REPLACE FUNCTION public.admin_get_condominium_subscriptions()
+CREATE OR REPLACE FUNCTION public.admin_get_condominium_subscriptions_with_alerts_sent()
  RETURNS TABLE(id bigint, condominium_id bigint, status text, custom_price_per_resident numeric, discount_percentage numeric, last_payment_date date, next_due_date date, created_at timestamp with time zone, updated_at timestamp with time zone, condominium_name text, current_residents_count bigint, payment_status text, months_in_arrears bigint, missing_months_list text, arrears_details jsonb, alerts_sent bigint)
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -3047,9 +3047,9 @@ $function$
 ;
 
 -- ----------------------------------------
--- Function: get_notifications
+-- Function: get_notifications_legacy
 -- ----------------------------------------
-CREATE OR REPLACE FUNCTION public.get_notifications(p_resident_id integer)
+CREATE OR REPLACE FUNCTION public.get_notifications_legacy(p_resident_id integer)
  RETURNS SETOF notifications
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -3171,6 +3171,25 @@ BEGIN
   FROM public.residents r
   WHERE r.id = p_resident_id
   LIMIT 1;
+END;
+$function$
+;
+
+-- ----------------------------------------
+-- Function: get_residents_by_condominium
+-- ----------------------------------------
+CREATE OR REPLACE FUNCTION public.get_residents_by_condominium(p_condominium_id integer)
+ RETURNS SETOF residents
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+  RETURN QUERY
+  SELECT *
+  FROM public.residents
+  WHERE condominium_id = p_condominium_id
+  ORDER BY name;
 END;
 $function$
 ;
@@ -3796,9 +3815,9 @@ $function$
 ;
 
 -- ----------------------------------------
--- Function: mark_notification_read
+-- Function: mark_notification_read_unscoped
 -- ----------------------------------------
-CREATE OR REPLACE FUNCTION public.mark_notification_read(p_notification_id integer)
+CREATE OR REPLACE FUNCTION public.mark_notification_read_unscoped(p_notification_id integer)
  RETURNS void
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -4165,6 +4184,22 @@ BEGIN
       updated_at = now()
   WHERE id = p_qr_id
   RETURNING *;
+END;
+$function$
+;
+
+-- ----------------------------------------
+-- Function: set_condo_visitor_photo_setting
+-- ----------------------------------------
+CREATE OR REPLACE FUNCTION public.set_condo_visitor_photo_setting(p_condo_id integer, p_enabled boolean)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+AS $function$
+BEGIN
+  UPDATE public.condominiums
+  SET visitor_photo_enabled = p_enabled
+  WHERE id = p_condo_id;
 END;
 $function$
 ;

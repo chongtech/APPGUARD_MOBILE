@@ -8,6 +8,7 @@
     "ios": "npx expo start --ios",
     "web": "npx expo start --web",
     "lint": "npx expo lint",
+    "check:rpcs": "node scripts/verify-rpc-signatures.js",
     "check:format": "prettier --check \"**/*.{js,ts,tsx,json}\"",
     "format": "prettier --write \"**/*.{js,ts,tsx,json}\""
   },

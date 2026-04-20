@@ -44,15 +44,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       ms: number,
       fallback: T,
     ): Promise<T> =>
-      Promise.race([
-        p,
-        new Promise<T>((resolve) =>
-          setTimeout(() => {
-            logger.warn(LogCategory.AUTH, `${label} timeout (${ms}ms)`);
-            resolve(fallback);
-          }, ms),
-        ),
-      ]);
+      new Promise<T>((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+          logger.warn(LogCategory.AUTH, `${label} timeout (${ms}ms)`);
+          resolve(fallback);
+        }, ms);
+
+        p.then(
+          (value) => {
+            clearTimeout(timeoutId);
+            resolve(value);
+          },
+          (error) => {
+            clearTimeout(timeoutId);
+            reject(error);
+          },
+        );
+      });
 
     try {
       logger.info(LogCategory.AUTH, "refreshSession: api.init start");

@@ -15,8 +15,12 @@ import NetInfo from "@react-native-community/netinfo";
 import { flushSentry } from "@/config/sentry";
 import { db } from "@/database/adapter";
 import { getDb } from "@/database/db";
-import { callRpc } from "@/lib/data/rpc";
-import { verifyStaffLogin, getCondominiumList } from "@/lib/data/auth";
+import { callRpc, callRpcFirst } from "@/lib/data/rpc";
+import {
+  verifyStaffLogin,
+  getCondominiumList,
+  getCondominiumById,
+} from "@/lib/data/auth";
 import {
   registerDevice,
   updateDeviceHeartbeat,
@@ -273,9 +277,7 @@ class DataService {
     const local = await db.condominiums.get(this.currentCondoId);
     if (local) return local;
     if (this.isBackendHealthy) {
-      const remote = await callRpc<Condominium>("get_condominium_by_id", {
-        p_condominium_id: this.currentCondoId,
-      });
+      const remote = await getCondominiumById(this.currentCondoId);
       if (remote) await db.condominiums.put(remote);
       return remote;
     }
@@ -313,25 +315,36 @@ class DataService {
 
     if (this.isBackendHealthy) {
       try {
-        const result = await verifyStaffLogin(
-          fName,
-          lName,
-          this.currentCondoId,
-        );
+        const result = await verifyStaffLogin(fName, lName, pin);
         if (!result) return null;
 
-        const { staff, pin_hash } = result;
-        const valid = await bcrypt.compare(pin, pin_hash);
-        if (!valid) return null;
+        if (
+          result.role !== "SUPER_ADMIN" &&
+          result.condominium_id !== this.currentCondoId
+        ) {
+          logger.warn(
+            LogCategory.AUTH,
+            "verify_staff_login returned staff for a different condominium",
+            {
+              expectedCondominiumId: this.currentCondoId,
+              actualCondominiumId: result.condominium_id,
+              staffId: result.id,
+            },
+          );
+          return null;
+        }
 
-        // Cache for offline login
-        const staffWithHash = { ...staff, pin_hash };
-        await db.staff.put(staffWithHash);
-        await AsyncStorage.setItem(KEYS.SESSION_STAFF_ID, String(staff.id));
+        // Preserve any previously cached hash so offline login keeps working.
+        const cachedStaff = await db.staff.get(result.id);
+        const staff: Staff = cachedStaff?.pin_hash
+          ? { ...result, pin_hash: cachedStaff.pin_hash }
+          : result;
+        await db.staff.put(staff);
+        await AsyncStorage.setItem(KEYS.SESSION_STAFF_ID, String(result.id));
 
         logger.trackAction("login_success", {
-          staffId: staff.id,
-          role: staff.role,
+          staffId: result.id,
+          role: result.role,
         });
         return staff;
       } catch (error) {
@@ -424,11 +437,7 @@ class DataService {
 
     if (this.isBackendHealthy) {
       try {
-        const remote = await callRpc<Visit>("register_visit", {
-          p_visit: visit,
-          p_device_id: this.currentDeviceId,
-        });
-        const synced: Visit = { ...remote, sync_status: SyncStatusEnum.SYNCED };
+        const synced = await this.createVisitRemote(visit);
         // Replace temp local record with server record
         await db.visits.delete(visit.id);
         await db.visits.put(synced);
@@ -472,14 +481,11 @@ class DataService {
 
     if (this.isBackendHealthy) {
       try {
-        await callRpc<void>("update_visit_status", {
-          p_visit_id: visitId,
-          p_status: status,
-          p_actor_id: actorId,
-          p_approval_mode: mode ?? null,
-          p_device_id: this.currentDeviceId,
-        });
+        await this.syncVisitEvent(event, mode);
         await db.visits.where("id").equals(visitId).modify({
+          sync_status: SyncStatusEnum.SYNCED,
+        });
+        await db.visitEvents.where("visit_id").equals(visitId).modify({
           sync_status: SyncStatusEnum.SYNCED,
         });
       } catch (error) {
@@ -536,8 +542,8 @@ class DataService {
     if (this.isBackendHealthy) {
       try {
         await callRpc<void>("acknowledge_incident", {
-          p_incident_id: incidentId,
-          p_staff_id: staffId,
+          p_id: incidentId,
+          p_guard_id: staffId,
         });
         await this.refreshIncidents();
       } catch (error) {
@@ -554,8 +560,8 @@ class DataService {
   ): Promise<void> {
     if (this.isBackendHealthy) {
       try {
-        await callRpc<void>("report_incident_action", {
-          p_incident_id: incidentId,
+        await callRpc<void>("update_incident_status", {
+          p_id: incidentId,
           p_notes: notes,
           p_status: status,
         });
@@ -590,7 +596,7 @@ class DataService {
 
   private async refreshIncidents(): Promise<Incident[]> {
     try {
-      const remote = await callRpc<Incident[]>("get_incidents_for_guard", {
+      const remote = await callRpc<Incident[]>("get_incidents", {
         p_condominium_id: this.currentCondoId,
       });
       if (remote?.length) await db.incidents.bulkPut(remote);
@@ -665,7 +671,7 @@ class DataService {
 
   private async refreshRestaurants(condoId: number): Promise<Restaurant[]> {
     try {
-      const remote = await callRpc<Restaurant[]>("get_restaurants_for_condo", {
+      const remote = await callRpc<Restaurant[]>("get_restaurants", {
         p_condominium_id: condoId,
       });
       if (remote?.length) await db.restaurants.bulkPut(remote);
@@ -691,7 +697,7 @@ class DataService {
 
   private async refreshSports(condoId: number): Promise<Sport[]> {
     try {
-      const remote = await callRpc<Sport[]>("get_sports_for_condo", {
+      const remote = await callRpc<Sport[]>("get_sports", {
         p_condominium_id: condoId,
       });
       if (remote?.length) await db.sports.bulkPut(remote);
@@ -717,7 +723,7 @@ class DataService {
 
   private async refreshUnits(condoId: number): Promise<Unit[]> {
     try {
-      const remote = await callRpc<Unit[]>("get_units_for_condo", {
+      const remote = await callRpc<Unit[]>("get_units", {
         p_condominium_id: condoId,
       });
       if (remote?.length) await db.units.bulkPut(remote);
@@ -743,7 +749,7 @@ class DataService {
 
   private async refreshResidents(condoId: number): Promise<Resident[]> {
     try {
-      const remote = await callRpc<Resident[]>("get_residents_for_condo", {
+      const remote = await callRpc<Resident[]>("get_residents_by_condominium", {
         p_condominium_id: condoId,
       });
       if (remote?.length) await db.residents.bulkPut(remote);
@@ -769,7 +775,7 @@ class DataService {
 
   private async refreshNews(condoId: number): Promise<CondominiumNews[]> {
     try {
-      const remote = await callRpc<CondominiumNews[]>("get_news_for_condo", {
+      const remote = await callRpc<CondominiumNews[]>("get_news", {
         p_condominium_id: condoId,
         p_days: 7,
       });
@@ -830,14 +836,10 @@ class DataService {
 
       for (const visit of pendingVisits) {
         try {
-          const remote = await callRpc<Visit>("register_visit", {
-            p_visit: visit,
-            p_device_id: this.currentDeviceId,
+          const synced = await this.createVisitRemote(visit);
+          await db.visitEvents.where("visit_id").equals(visit.id).modify({
+            visit_id: synced.id,
           });
-          const synced: Visit = {
-            ...remote,
-            sync_status: SyncStatusEnum.SYNCED,
-          };
           await db.visits.delete(visit.id);
           await db.visits.put(synced);
         } catch {
@@ -853,13 +855,7 @@ class DataService {
 
       for (const event of pendingEvents) {
         try {
-          await callRpc<void>("update_visit_status", {
-            p_visit_id: event.visit_id,
-            p_status: event.status,
-            p_actor_id: event.actor_id,
-            p_device_id: event.device_id,
-            p_event_at: event.event_at,
-          });
+          await this.syncVisitEvent(event);
           await db.visitEvents.where("id").equals(event.id!).modify({
             sync_status: SyncStatusEnum.SYNCED,
           });
@@ -886,9 +882,88 @@ class DataService {
       const identifier = await getDeviceIdentifier();
       updateDeviceHeartbeat({
         deviceIdentifier: identifier,
-        condominiumId: this.currentCondoId,
       }).catch(() => {});
     }, 5 * 60_000); // every 5 minutes
+  }
+
+  async getResidentById(residentId: number): Promise<Resident | null> {
+    if (!this.isBackendHealthy) {
+      return (await db.residents.get(residentId)) ?? null;
+    }
+
+    try {
+      const remote = await callRpcFirst<Resident>("get_resident", {
+        p_id: residentId,
+      });
+      if (remote) {
+        await db.residents.put(remote);
+      }
+      return remote;
+    } catch (error) {
+      logger.warn(LogCategory.SYNC, "getResidentById failed", error);
+      return (await db.residents.get(residentId)) ?? null;
+    }
+  }
+
+  private async createVisitRemote(visit: Visit): Promise<Visit> {
+    const remote = await callRpc<Visit>("create_visit", {
+      p_data: visit,
+    });
+
+    return {
+      ...visit,
+      ...remote,
+      sync_status: SyncStatusEnum.SYNCED,
+    };
+  }
+
+  private async syncVisitEvent(
+    event: VisitEvent,
+    mode?: ApprovalMode,
+  ): Promise<void> {
+    switch (event.status) {
+      case VisitStatusEnum.APPROVED:
+        if (mode) {
+          await callRpcFirst<Visit>("approve_visit", {
+            p_visit_id: event.visit_id,
+            p_approval_mode: mode,
+          });
+        } else {
+          await callRpcFirst<Visit>("approve_visit", {
+            p_visit_id: event.visit_id,
+          });
+        }
+        break;
+      case VisitStatusEnum.DENIED:
+        if (mode) {
+          await callRpcFirst<Visit>("deny_visit", {
+            p_visit_id: event.visit_id,
+            p_approval_mode: mode,
+          });
+        } else {
+          await callRpcFirst<Visit>("deny_visit", {
+            p_visit_id: event.visit_id,
+          });
+        }
+        break;
+      case VisitStatusEnum.LEFT:
+        await callRpc<Visit>("checkout_visit", {
+          p_id: event.visit_id,
+        });
+        break;
+      default:
+        throw new Error(`Unsupported visit status sync: ${event.status}`);
+    }
+
+    await callRpc<VisitEvent>("create_visit_event", {
+      p_data: {
+        visit_id: event.visit_id,
+        status: event.status,
+        event_at: event.event_at,
+        actor_id: event.actor_id ?? null,
+        device_id: event.device_id ?? null,
+      },
+    });
   }
 
   // ─── Event Emitter ─────────────────────────────────────────────────────────

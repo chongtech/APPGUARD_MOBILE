@@ -179,6 +179,7 @@ npm run web                        # Run web build
 
 # Linting & Formatting
 npm run lint                       # ESLint check (main verification command — no test suite)
+npm run check:rpcs                 # Verify app RPC calls against all_rpcs.sql
 npm run check:format               # Check Prettier formatting
 npm run format                     # Apply Prettier formatting
 
@@ -206,6 +207,7 @@ await api.createVisit(visitData);
 ```
 
 For auth/device/visit flows, inspect `DataService` before adding new APIs elsewhere.
+For database functions, keep `.rpc(...)` usage inside `lib/data/rpc.ts`, `lib/data/*`, or `services/dataService.ts`.
 
 ### Using Theme
 
@@ -281,6 +283,7 @@ Before finishing any change, verify:
 - [ ] Types still match the changed payloads and tables.
 - [ ] Offline behavior still makes sense for the modified flow (both online and offline/sync paths preserved).
 - [ ] New Supabase or RPC usage does not bypass existing abstractions without a good reason.
+- [ ] `npm run check:rpcs` passes when RPC code or SQL signatures change.
 - [ ] `npm run lint` passes when code changes are made.
 - [ ] Formatting is consistent (`npm run check:format`).
 
