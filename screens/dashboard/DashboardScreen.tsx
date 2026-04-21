@@ -5,6 +5,11 @@ import {
   ScrollView,
   Pressable,
   RefreshControl,
+  Modal,
+  TextInput,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { ThemedView } from "@/components/ThemedView";
@@ -24,6 +29,7 @@ import {
 import { supabase } from "@/lib/supabase";
 import { useToast } from "@/contexts/ToastContext";
 import { scheduleVisitApprovalNotification } from "@/services/pushNotifications";
+import { askConcierge } from "@/services/geminiService";
 import type { Visit, Incident } from "@/types";
 import { VisitStatus, ApprovalMode } from "@/types";
 
@@ -37,6 +43,10 @@ export default function DashboardScreen() {
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const visitsRef = useRef<Visit[]>([]);
+  const [conciergeOpen, setConciergeOpen] = useState(false);
+  const [conciergeQuery, setConciergeQuery] = useState("");
+  const [conciergeAnswer, setConciergeAnswer] = useState("");
+  const [conciergeLoading, setConciergeLoading] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -125,6 +135,21 @@ export default function DashboardScreen() {
     return "Boa noite";
   };
 
+  const handleAskConcierge = async () => {
+    if (!conciergeQuery.trim() || conciergeLoading) return;
+    setConciergeLoading(true);
+    setConciergeAnswer("");
+    const context = [
+      `Condomínio ID: ${staff?.condominium_id ?? "—"}`,
+      `Guarda: ${staff?.first_name} ${staff?.last_name}`,
+      `Visitas hoje: ${visits.length} (${insideCount} no interior, ${pendingCount} pendentes)`,
+      `Incidentes abertos: ${openIncidents}`,
+    ].join("\n");
+    const answer = await askConcierge(conciergeQuery.trim(), context);
+    setConciergeAnswer(answer);
+    setConciergeLoading(false);
+  };
+
   return (
     <ThemedView style={styles.container}>
       <ScrollView
@@ -152,22 +177,51 @@ export default function DashboardScreen() {
               })}
             </ThemedText>
           </View>
-          {!isOnline && (
-            <View
+          <View style={styles.headerActions}>
+            {!isOnline && (
+              <View
+                style={[
+                  styles.offlineBadge,
+                  { backgroundColor: StatusColors.warning + "20" },
+                ]}
+              >
+                <Feather
+                  name="wifi-off"
+                  size={14}
+                  color={StatusColors.warning}
+                />
+                <ThemedText
+                  type="caption"
+                  style={{ color: StatusColors.warning }}
+                >
+                  Offline
+                </ThemedText>
+              </View>
+            )}
+            <Pressable
+              onPress={() => {
+                setConciergeOpen(true);
+                setConciergeQuery("");
+                setConciergeAnswer("");
+              }}
               style={[
-                styles.offlineBadge,
-                { backgroundColor: StatusColors.warning + "20" },
+                styles.conciergeBtn,
+                { backgroundColor: BrandColors.primary + "15" },
               ]}
             >
-              <Feather name="wifi-off" size={14} color={StatusColors.warning} />
+              <Feather
+                name="message-circle"
+                size={18}
+                color={BrandColors.primary}
+              />
               <ThemedText
-                type="caption"
-                style={{ color: StatusColors.warning }}
+                type="small"
+                style={{ color: BrandColors.primary, fontWeight: "700" }}
               >
-                Offline
+                Concierge IA
               </ThemedText>
-            </View>
-          )}
+            </Pressable>
+          </View>
         </View>
 
         {/* Stats Row */}
@@ -221,6 +275,104 @@ export default function DashboardScreen() {
           )}
         </View>
       </ScrollView>
+
+      <Modal
+        visible={conciergeOpen}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setConciergeOpen(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={styles.conciergeOverlay}
+        >
+          <View
+            style={[
+              styles.conciergeSheet,
+              { backgroundColor: theme.backgroundDefault },
+            ]}
+          >
+            <View style={styles.conciergeHeader}>
+              <Feather
+                name="message-circle"
+                size={20}
+                color={BrandColors.primary}
+              />
+              <ThemedText type="h3" style={{ flex: 1 }}>
+                Concierge IA
+              </ThemedText>
+              <Pressable onPress={() => setConciergeOpen(false)}>
+                <Feather name="x" size={22} color={theme.textSecondary} />
+              </Pressable>
+            </View>
+
+            <ScrollView
+              style={styles.conciergeBody}
+              contentContainerStyle={{ padding: Spacing.lg, gap: Spacing.md }}
+              keyboardShouldPersistTaps="handled"
+            >
+              {conciergeAnswer ? (
+                <ThemedText type="body">{conciergeAnswer}</ThemedText>
+              ) : (
+                !conciergeLoading && (
+                  <ThemedText
+                    type="body"
+                    style={{ color: theme.textSecondary }}
+                  >
+                    Faça uma pergunta sobre visitantes, procedimentos ou o
+                    estado do condomínio.
+                  </ThemedText>
+                )
+              )}
+              {conciergeLoading && (
+                <ActivityIndicator
+                  color={BrandColors.primary}
+                  style={{ marginTop: Spacing.md }}
+                />
+              )}
+            </ScrollView>
+
+            <View
+              style={[
+                styles.conciergeInputRow,
+                { borderTopColor: theme.border },
+              ]}
+            >
+              <TextInput
+                style={[
+                  styles.conciergeInput,
+                  {
+                    color: theme.text,
+                    backgroundColor: theme.backgroundSecondary,
+                    borderColor: theme.border,
+                  },
+                ]}
+                placeholder="Faça uma pergunta..."
+                placeholderTextColor={theme.textSecondary}
+                value={conciergeQuery}
+                onChangeText={setConciergeQuery}
+                onSubmitEditing={handleAskConcierge}
+                returnKeyType="send"
+                multiline={false}
+              />
+              <Pressable
+                onPress={handleAskConcierge}
+                disabled={conciergeLoading || !conciergeQuery.trim()}
+                style={[
+                  styles.sendBtn,
+                  {
+                    backgroundColor: BrandColors.primary,
+                    opacity:
+                      conciergeLoading || !conciergeQuery.trim() ? 0.4 : 1,
+                  },
+                ]}
+              >
+                <Feather name="send" size={18} color="#fff" />
+              </Pressable>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </ThemedView>
   );
 }
@@ -353,4 +505,59 @@ const styles = StyleSheet.create({
   },
   visitStatus: { width: 4, height: 40, borderRadius: 2 },
   visitInfo: { flex: 1, gap: 2 },
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+  },
+  conciergeBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.xs,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.xs,
+    borderRadius: BorderRadius.full,
+  },
+  conciergeOverlay: {
+    flex: 1,
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(0,0,0,0.5)",
+  },
+  conciergeSheet: {
+    borderTopLeftRadius: BorderRadius.xl,
+    borderTopRightRadius: BorderRadius.xl,
+    maxHeight: "70%",
+    ...Shadows.large,
+  },
+  conciergeHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.md,
+    padding: Spacing.lg,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(0,0,0,0.08)",
+  },
+  conciergeBody: { flexGrow: 0 },
+  conciergeInputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+    padding: Spacing.md,
+    borderTopWidth: 1,
+  },
+  conciergeInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    fontSize: 15,
+  },
+  sendBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: BorderRadius.full,
+    justifyContent: "center",
+    alignItems: "center",
+  },
 });
