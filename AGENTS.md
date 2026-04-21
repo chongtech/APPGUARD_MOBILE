@@ -149,7 +149,7 @@ APPGUARD_MOBILE/
 |  |- db.ts                    SQLite init + migration runner (PRAGMA user_version)
 |  |- schema.ts                Table definitions & indexes
 |  |- adapter.ts               Dexie-like compatibility adapter
-|  '- migrations/              SQL migration files
+|  '- migrations/              Single consolidated Supabase SQL catalog (`all.sql`)
 |
 |- hooks/                      useTheme, useColorScheme, useScreenInsets, useNetInfo
 |
@@ -192,6 +192,7 @@ npm run web
 
 # Linting / formatting
 npm run lint
+npm run check:rpcs
 npm run check:format
 npm run format
 
@@ -204,6 +205,7 @@ eas build --profile production
 Notes for agents:
 
 - `npm run lint` is the main repository-level verification command
+- `npm run check:rpcs` verifies that app RPC calls match the canonical RPC catalog inside `database/migrations/all.sql`
 - there is no dedicated automated test script in `package.json` at the moment
 
 ## Key Patterns
@@ -218,6 +220,9 @@ import { api } from "@/services/dataService";
 const visits = await api.getTodaysVisits();
 await api.createVisit(visitData);
 ```
+
+For database functions, call them only through `lib/data/rpc.ts`, `lib/data/*`, or `services/dataService.ts`.
+Do not use `.rpc(...)` directly in screens or components.
 
 ### Using Theme
 
@@ -242,8 +247,8 @@ showToast("Visita registada com sucesso", "success");
 
 ### Adding a Database Migration
 
-1. Create a new SQL file in `database/migrations/` such as `015_add_column.sql`
-2. Increment the version in the `database/db.ts` migration runner
+1. Update the single consolidated SQL file at `database/migrations/all.sql`
+2. Increment the version in the `database/db.ts` migration runner if local SQLite changes are needed
 3. Test with `/db-migrate` or through `DataService` init
 
 Agent implication:
@@ -282,4 +287,5 @@ Before finishing work in this repository, verify the relevant items:
 - New backend usage still goes through `services/dataService.ts` or `lib/data/*`.
 - User-facing text remains in Portuguese.
 - Auth changes still respect PIN-based kiosk behavior and `persistSession: false`.
+- `npm run check:rpcs` passes when RPC code or SQL signatures change.
 - `npm run lint` passes when code changes are made.

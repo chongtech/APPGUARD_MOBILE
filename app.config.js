@@ -10,7 +10,8 @@ module.exports = () => {
   const expoConfig = appJson.expo;
   const buildProfile = process.env.EAS_BUILD_PROFILE;
   const disableSentryForThisBuild =
-    buildProfile === "preview" || process.env.SENTRY_DISABLE_AUTO_UPLOAD === "true";
+    buildProfile === "preview" ||
+    process.env.SENTRY_DISABLE_AUTO_UPLOAD === "true";
 
   return {
     ...expoConfig,

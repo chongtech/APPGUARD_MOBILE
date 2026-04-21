@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#0f172a" rx="64"/>
+  <g fill="#fff">
+    <!-- Shield -->
+    <path d="M256 80 L160 120 L160 240 Q160 320 256 400 Q352 320 352 240 L352 120 Z" stroke="#0ea5e9" stroke-width="8" fill="none"/>
+    <!-- Building -->
+    <rect x="220" y="180" width="72" height="120" fill="#0ea5e9"/>
+    <rect x="230" y="190" width="15" height="15" fill="#fff"/>
+    <rect x="267" y="190" width="15" height="15" fill="#fff"/>
+    <rect x="230" y="220" width="15" height="15" fill="#fff"/>
+    <rect x="267" y="220" width="15" height="15" fill="#fff"/>
+    <rect x="230" y="250" width="15" height="15" fill="#fff"/>
+    <rect x="267" y="250" width="15" height="15" fill="#fff"/>
+    <rect x="242" y="270" width="28" height="30" fill="#334155"/>
+  </g>
+  <text x="256" y="450" font-family="Arial, sans-serif" font-size="48" font-weight="bold" fill="#0ea5e9" text-anchor="middle">GUARD</text>
+</svg>

@@ -6,12 +6,12 @@ argument-hint: <path-to-sql-file>
 
 # Apply Database Migration
 
-Apply a SQL migration from `database/*.sql` to the Supabase project.
+Apply the consolidated SQL migration from `database/migrations/all.sql` to the Supabase project.
 
 ## Steps
 
-1. **Read the migration file**: $ARGUMENTS
-   - If no argument given, list files in `database/` and ask which to apply
+1. **Read the migration file**: `database/migrations/all.sql`
+   - Ignore `$ARGUMENTS` unless the user explicitly asks for a different local SQL file
    - Display the SQL content to the user for review
 
 2. **Confirm before applying**

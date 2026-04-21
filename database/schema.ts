@@ -1,7 +1,7 @@
 // SQLite schema — mirrors Dexie schema in APPGUARD/src/services/db.ts (version 12)
 // Applied via PRAGMA user_version migrations in db.ts
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export const CREATE_TABLES_SQL = `
 CREATE TABLE IF NOT EXISTS visits (
@@ -116,6 +116,7 @@ CREATE TABLE IF NOT EXISTS condominiums (
   contact_person TEXT,
   contact_email TEXT,
   manager_name TEXT,
+  visitor_photo_enabled INTEGER NOT NULL DEFAULT 1,
   created_at TEXT
 );
 

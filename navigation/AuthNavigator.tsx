@@ -18,8 +18,16 @@ export function AuthNavigator() {
 
   return (
     <Stack.Navigator screenOptions={screenOptions}>
-      <Stack.Screen name="Setup" component={SetupScreen} options={{ title: "Configuração" }} />
-      <Stack.Screen name="Login" component={LoginScreen} options={{ title: "Entrar" }} />
+      <Stack.Screen
+        name="Setup"
+        component={SetupScreen}
+        options={{ title: "Configuração" }}
+      />
+      <Stack.Screen
+        name="Login"
+        component={LoginScreen}
+        options={{ title: "Entrar" }}
+      />
     </Stack.Navigator>
   );
 }

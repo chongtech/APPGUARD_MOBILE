@@ -3,14 +3,27 @@ import { useTheme } from "@/hooks/useTheme";
 import { useScreenInsets } from "@/hooks/useScreenInsets";
 import { Spacing } from "@/constants/theme";
 
-export function ScreenScrollView({ children, contentContainerStyle, style, ...scrollViewProps }: ScrollViewProps) {
+export function ScreenScrollView({
+  children,
+  contentContainerStyle,
+  style,
+  ...scrollViewProps
+}: ScrollViewProps) {
   const { theme } = useTheme();
   const { paddingTop, paddingBottom, scrollInsetBottom } = useScreenInsets();
 
   return (
     <ScrollView
-      style={[styles.container, { backgroundColor: theme.backgroundRoot }, style]}
-      contentContainerStyle={[{ paddingTop, paddingBottom }, styles.contentContainer, contentContainerStyle]}
+      style={[
+        styles.container,
+        { backgroundColor: theme.backgroundRoot },
+        style,
+      ]}
+      contentContainerStyle={[
+        { paddingTop, paddingBottom },
+        styles.contentContainer,
+        contentContainerStyle,
+      ]}
       scrollIndicatorInsets={{ bottom: scrollInsetBottom }}
       {...scrollViewProps}
     >

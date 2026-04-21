@@ -1,4 +1,10 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+} from "react";
 import { api } from "@/services/dataService";
 import { logger, LogCategory } from "@/services/logger";
 import type { Staff, UserRole } from "@/types";
@@ -11,7 +17,11 @@ interface AuthState {
 }
 
 interface AuthContextValue extends AuthState {
-  login: (firstName: string, lastName: string, pin: string) => Promise<Staff | null>;
+  login: (
+    firstName: string,
+    lastName: string,
+    pin: string,
+  ) => Promise<Staff | null>;
   logout: () => Promise<void>;
   refreshSession: () => Promise<void>;
   hasRole: (...roles: UserRole[]) => boolean;
@@ -28,13 +38,53 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   });
 
   const refreshSession = useCallback(async () => {
-    try {
-      await api.init();
+    const withTimeout = <T,>(
+      label: string,
+      p: Promise<T>,
+      ms: number,
+      fallback: T,
+    ): Promise<T> =>
+      new Promise<T>((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+          logger.warn(LogCategory.AUTH, `${label} timeout (${ms}ms)`);
+          resolve(fallback);
+        }, ms);
 
-      const [configured, sessionStaff] = await Promise.all([
+        p.then(
+          (value) => {
+            clearTimeout(timeoutId);
+            resolve(value);
+          },
+          (error) => {
+            clearTimeout(timeoutId);
+            reject(error);
+          },
+        );
+      });
+
+    try {
+      logger.info(LogCategory.AUTH, "refreshSession: api.init start");
+      await withTimeout("api.init", api.init(), 5000, undefined);
+      logger.info(LogCategory.AUTH, "refreshSession: api.init ok");
+
+      const configured = await withTimeout(
+        "isDeviceConfigured",
         api.isDeviceConfigured(),
-        api.getSessionStaff(),
-      ]);
+        4000,
+        false,
+      );
+      const sessionStaff = configured
+        ? await withTimeout<Staff | null>(
+            "getSessionStaff",
+            api.getSessionStaff(),
+            4000,
+            null,
+          )
+        : null;
+      logger.info(LogCategory.AUTH, "refreshSession: session queries ok", {
+        configured,
+        hasStaff: !!sessionStaff,
+      });
 
       if (sessionStaff) {
         logger.setUser({
@@ -52,7 +102,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
     } catch (error) {
       logger.error(LogCategory.AUTH, "refreshSession failed", error);
-      setState((prev) => ({ ...prev, isLoading: false }));
+      // Always release the splash — fall through to AuthNavigator so the user
+      // can reach setup/login instead of being stuck on the loading state.
+      setState({
+        staff: null,
+        isLoading: false,
+        isDeviceConfigured: false,
+        condominiumId: null,
+      });
     }
   }, []);
 
@@ -62,7 +119,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [refreshSession]);
 
   const login = useCallback(
-    async (firstName: string, lastName: string, pin: string): Promise<Staff | null> => {
+    async (
+      firstName: string,
+      lastName: string,
+      pin: string,
+    ): Promise<Staff | null> => {
       const staff = await api.login(firstName, lastName, pin);
       if (staff) {
         setState((prev) => ({ ...prev, staff }));
@@ -75,7 +136,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       return staff;
     },
-    []
+    [],
   );
 
   const logout = useCallback(async () => {
@@ -89,11 +150,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!state.staff) return false;
       return roles.includes(state.staff.role);
     },
-    [state.staff]
+    [state.staff],
   );
 
   return (
-    <AuthContext.Provider value={{ ...state, login, logout, refreshSession, hasRole }}>
+    <AuthContext.Provider
+      value={{ ...state, login, logout, refreshSession, hasRole }}
+    >
       {children}
     </AuthContext.Provider>
   );

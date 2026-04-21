@@ -55,15 +55,30 @@ export default function AdminStackNavigator() {
       <Stack.Screen name="AdminVisits" component={AdminVisitsScreen} />
       <Stack.Screen name="AdminIncidents" component={AdminIncidentsScreen} />
       <Stack.Screen name="AdminVisitTypes" component={AdminVisitTypesScreen} />
-      <Stack.Screen name="AdminServiceTypes" component={AdminServiceTypesScreen} />
-      <Stack.Screen name="AdminRestaurants" component={AdminRestaurantsScreen} />
+      <Stack.Screen
+        name="AdminServiceTypes"
+        component={AdminServiceTypesScreen}
+      />
+      <Stack.Screen
+        name="AdminRestaurants"
+        component={AdminRestaurantsScreen}
+      />
       <Stack.Screen name="AdminSports" component={AdminSportsScreen} />
       <Stack.Screen name="AdminDevices" component={AdminDevicesScreen} />
-      <Stack.Screen name="AdminDeviceRegistrationErrors" component={AdminDeviceRegistrationErrorsScreen} />
+      <Stack.Screen
+        name="AdminDeviceRegistrationErrors"
+        component={AdminDeviceRegistrationErrorsScreen}
+      />
       <Stack.Screen name="AdminNews" component={AdminNewsScreen} />
       <Stack.Screen name="AdminAuditLogs" component={AdminAuditLogsScreen} />
-      <Stack.Screen name="AdminCondominiums" component={AdminCondominiumsScreen} />
-      <Stack.Screen name="AdminSubscriptions" component={AdminSubscriptionsScreen} />
+      <Stack.Screen
+        name="AdminCondominiums"
+        component={AdminCondominiumsScreen}
+      />
+      <Stack.Screen
+        name="AdminSubscriptions"
+        component={AdminSubscriptionsScreen}
+      />
     </Stack.Navigator>
   );
 }

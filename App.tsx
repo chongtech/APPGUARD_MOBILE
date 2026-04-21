@@ -1,10 +1,18 @@
 import React, { useRef } from "react";
-import { NavigationContainer, NavigationContainerRef } from "@react-navigation/native";
+import {
+  NavigationContainer,
+  NavigationContainerRef,
+} from "@react-navigation/native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 
-import { initSentry, navigationIntegration } from "@/config/sentry";
+import {
+  flushSentry,
+  initSentry,
+  navigationIntegration,
+  Sentry,
+} from "@/config/sentry";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ToastProvider } from "@/contexts/ToastContext";
@@ -15,6 +23,35 @@ import { useTheme } from "@/hooks/useTheme";
 
 // Initialize Sentry before rendering
 initSentry();
+
+// Positive-signal beacon: confirms the JS bundle executed on-device.
+// Absence of this event in Sentry after a crashed launch means the failure
+// is in native init (before JS runs).
+Sentry.captureEvent({
+  level: "info",
+  logger: "boot",
+  message: "boot:js-started",
+  tags: { phase: "js-started" },
+});
+
+// Catch async/unhandled JS errors that slip past React's ErrorBoundary.
+type ErrorUtilsGlobal = {
+  ErrorUtils?: {
+    getGlobalHandler?: () => (error: Error, isFatal?: boolean) => void;
+    setGlobalHandler?: (
+      handler: (error: Error, isFatal?: boolean) => void,
+    ) => void;
+  };
+};
+const errorUtils = (globalThis as unknown as ErrorUtilsGlobal).ErrorUtils;
+const previousHandler = errorUtils?.getGlobalHandler?.();
+errorUtils?.setGlobalHandler?.((error, isFatal) => {
+  Sentry.captureException(error, {
+    tags: { source: "globalHandler", fatal: String(!!isFatal) },
+  });
+  flushSentry(2000);
+  previousHandler?.(error, isFatal);
+});
 
 function AppInner() {
   const navRef = useRef<NavigationContainerRef<Record<string, unknown>>>(null);
@@ -34,7 +71,7 @@ function AppInner() {
   );
 }
 
-export default function App() {
+function App() {
   return (
     <ErrorBoundary>
       <GestureHandlerRootView style={{ flex: 1 }}>
@@ -51,3 +88,5 @@ export default function App() {
     </ErrorBoundary>
   );
 }
+
+export default Sentry.wrap(App);

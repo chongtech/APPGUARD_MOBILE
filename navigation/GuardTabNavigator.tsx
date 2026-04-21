@@ -10,6 +10,7 @@ import NewEntryScreen from "@/screens/visits/NewEntryScreen";
 import IncidentsScreen from "@/screens/incidents/IncidentsScreen";
 import NewsScreen from "@/screens/news/NewsScreen";
 import SettingsScreen from "@/screens/settings/SettingsScreen";
+import ResidentSearchScreen from "@/screens/residents/ResidentSearchScreen";
 import AdminStackNavigator from "@/navigation/AdminStackNavigator";
 import { UserRole } from "@/types";
 
@@ -19,6 +20,7 @@ export type GuardTabParamList = {
   NewEntry: undefined;
   Incidents: undefined;
   News: undefined;
+  ResidentSearch: undefined;
   Settings: undefined;
   Admin: undefined;
 };
@@ -35,7 +37,10 @@ export function GuardTabNavigator() {
       screenOptions={{
         tabBarActiveTintColor: BrandColors.primary,
         tabBarInactiveTintColor: theme.tabIconDefault,
-        tabBarStyle: { backgroundColor: theme.backgroundRoot, borderTopColor: theme.border },
+        tabBarStyle: {
+          backgroundColor: theme.backgroundRoot,
+          borderTopColor: theme.border,
+        },
         headerStyle: { backgroundColor: theme.backgroundRoot },
         headerTintColor: theme.text,
         headerTitleAlign: "center",
@@ -44,38 +49,84 @@ export function GuardTabNavigator() {
       <Tab.Screen
         name="Dashboard"
         component={DashboardScreen}
-        options={{ title: "Início", tabBarIcon: ({ color, size }) => <Feather name="home" size={size} color={color} /> }}
+        options={{
+          title: "Início",
+          tabBarIcon: ({ color, size }) => (
+            <Feather name="home" size={size} color={color} />
+          ),
+        }}
       />
       <Tab.Screen
         name="DailyList"
         component={DailyListScreen}
-        options={{ title: "Registos", tabBarIcon: ({ color, size }) => <Feather name="list" size={size} color={color} /> }}
+        options={{
+          title: "Registos",
+          tabBarIcon: ({ color, size }) => (
+            <Feather name="list" size={size} color={color} />
+          ),
+        }}
       />
       <Tab.Screen
         name="NewEntry"
         component={NewEntryScreen}
-        options={{ title: "Nova Entrada", tabBarIcon: ({ color, size }) => <Feather name="plus-circle" size={size} color={color} /> }}
+        options={{
+          title: "Nova Entrada",
+          tabBarIcon: ({ color, size }) => (
+            <Feather name="plus-circle" size={size} color={color} />
+          ),
+        }}
       />
       <Tab.Screen
         name="Incidents"
         component={IncidentsScreen}
-        options={{ title: "Ocorrências", tabBarIcon: ({ color, size }) => <Feather name="alert-triangle" size={size} color={color} /> }}
+        options={{
+          title: "Ocorrências",
+          tabBarIcon: ({ color, size }) => (
+            <Feather name="alert-triangle" size={size} color={color} />
+          ),
+        }}
       />
       <Tab.Screen
         name="News"
         component={NewsScreen}
-        options={{ title: "Notícias", tabBarIcon: ({ color, size }) => <Feather name="file-text" size={size} color={color} /> }}
+        options={{
+          title: "Notícias",
+          tabBarIcon: ({ color, size }) => (
+            <Feather name="file-text" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="ResidentSearch"
+        component={ResidentSearchScreen}
+        options={{
+          title: "Moradores",
+          tabBarIcon: ({ color, size }) => (
+            <Feather name="users" size={size} color={color} />
+          ),
+        }}
       />
       <Tab.Screen
         name="Settings"
         component={SettingsScreen}
-        options={{ title: "Definições", tabBarIcon: ({ color, size }) => <Feather name="settings" size={size} color={color} /> }}
+        options={{
+          title: "Definições",
+          tabBarIcon: ({ color, size }) => (
+            <Feather name="settings" size={size} color={color} />
+          ),
+        }}
       />
       {isAdmin && (
         <Tab.Screen
           name="Admin"
           component={AdminStackNavigator}
-          options={{ title: "Admin", headerShown: false, tabBarIcon: ({ color, size }) => <Feather name="shield" size={size} color={color} /> }}
+          options={{
+            title: "Admin",
+            headerShown: false,
+            tabBarIcon: ({ color, size }) => (
+              <Feather name="shield" size={size} color={color} />
+            ),
+          }}
         />
       )}
     </Tab.Navigator>

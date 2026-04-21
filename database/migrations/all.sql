@@ -1,4 +1,286 @@
 -- ============================================================
+-- Consolidated SQL Catalog - EntryFlow / APPGUARD_MOBILE
+-- This file is the single local source of truth for Supabase SQL.
+-- Sections:
+--   1. Consolidated schema deltas and supporting objects
+--   2. Compatibility reconciliation for legacy overloaded RPC names
+--   3. Canonical public RPC catalog
+-- ============================================================
+
+-- ============================================================
+-- 1. Consolidated Schema Deltas
+-- ============================================================
+
+-- Subscription management tables and bootstrap objects.
+CREATE TABLE IF NOT EXISTS public.app_pricing_rules (
+  id SERIAL PRIMARY KEY,
+  min_residents INTEGER NOT NULL,
+  max_residents INTEGER,
+  price_per_resident NUMERIC(10, 2) NOT NULL,
+  currency VARCHAR(10) DEFAULT 'AOA' NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS public.condominium_subscriptions (
+  id SERIAL PRIMARY KEY,
+  condominium_id INTEGER NOT NULL REFERENCES public.condominiums(id) ON DELETE CASCADE,
+  status VARCHAR(20) DEFAULT 'ACTIVE' NOT NULL,
+  last_payment_date DATE,
+  next_due_date DATE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+  custom_price_per_resident NUMERIC(10, 2),
+  discount_percentage NUMERIC(5, 2) DEFAULT 0,
+  UNIQUE(condominium_id)
+);
+
+ALTER TABLE public.condominium_subscriptions
+DROP CONSTRAINT IF EXISTS condominium_subscriptions_status_check;
+
+ALTER TABLE public.condominium_subscriptions
+ADD CONSTRAINT condominium_subscriptions_status_check
+CHECK (status IN ('ACTIVE', 'OVERDUE', 'INACTIVE', 'TRIAL', 'SUSPENDED'));
+
+CREATE OR REPLACE FUNCTION public.create_condominium_subscription()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+  INSERT INTO public.condominium_subscriptions (condominium_id, status)
+  VALUES (NEW.id, 'ACTIVE')
+  ON CONFLICT (condominium_id) DO NOTHING;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS on_condominium_created_subscription ON public.condominiums;
+
+CREATE TRIGGER on_condominium_created_subscription
+AFTER INSERT ON public.condominiums
+FOR EACH ROW
+EXECUTE FUNCTION public.create_condominium_subscription();
+
+INSERT INTO public.condominium_subscriptions (condominium_id, status)
+SELECT id, 'ACTIVE'
+FROM public.condominiums
+ON CONFLICT (condominium_id) DO NOTHING;
+
+ALTER TABLE public.app_pricing_rules ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.condominium_subscriptions ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Allow authenticated full access app_pricing_rules" ON public.app_pricing_rules;
+CREATE POLICY "Allow authenticated full access app_pricing_rules"
+ON public.app_pricing_rules AS PERMISSIVE FOR ALL TO authenticated USING (true);
+
+DROP POLICY IF EXISTS "Allow authenticated full access condominium_subscriptions" ON public.condominium_subscriptions;
+CREATE POLICY "Allow authenticated full access condominium_subscriptions"
+ON public.condominium_subscriptions AS PERMISSIVE FOR ALL TO authenticated USING (true);
+
+-- Subscription payments and reporting support.
+CREATE TABLE IF NOT EXISTS public.subscription_payments (
+  id SERIAL PRIMARY KEY,
+  condominium_id INTEGER NOT NULL REFERENCES public.condominiums(id) ON DELETE CASCADE,
+  amount NUMERIC(10, 2) NOT NULL,
+  currency VARCHAR(10) DEFAULT 'AOA' NOT NULL,
+  payment_date DATE NOT NULL,
+  reference_period VARCHAR(20),
+  status VARCHAR(20) DEFAULT 'PAID' NOT NULL,
+  notes TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+ALTER TABLE public.subscription_payments DROP CONSTRAINT IF EXISTS subscription_payments_status_check;
+ALTER TABLE public.subscription_payments
+ADD CONSTRAINT subscription_payments_status_check
+CHECK (status IN ('PAID', 'PENDING', 'FAILED', 'PARTIAL'));
+
+ALTER TABLE public.subscription_payments ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Allow authenticated full access subscription_payments" ON public.subscription_payments;
+CREATE POLICY "Allow authenticated full access subscription_payments"
+ON public.subscription_payments AS PERMISSIVE FOR ALL TO authenticated USING (true);
+
+-- Subscription alerts and related access rules.
+CREATE TABLE IF NOT EXISTS public.subscription_alerts (
+  id SERIAL PRIMARY KEY,
+  condominium_id INTEGER NOT NULL REFERENCES public.condominiums(id) ON DELETE CASCADE,
+  alert_date TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  reference_month TEXT NOT NULL,
+  sent_by INTEGER NOT NULL REFERENCES public.staff(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE public.subscription_alerts ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Allow authenticated full access subscription_alerts" ON public.subscription_alerts;
+CREATE POLICY "Allow authenticated full access subscription_alerts"
+ON public.subscription_alerts AS PERMISSIVE FOR ALL TO authenticated USING (true);
+
+-- Supporting indexes used by subscription and resident reporting flows.
+CREATE INDEX IF NOT EXISTS idx_condominium_subscriptions_condo
+ON public.condominium_subscriptions(condominium_id);
+
+CREATE INDEX IF NOT EXISTS idx_subscription_payments_condo_period
+ON public.subscription_payments(condominium_id, reference_period);
+
+CREATE INDEX IF NOT EXISTS idx_subscription_payments_status
+ON public.subscription_payments(status);
+
+CREATE INDEX IF NOT EXISTS idx_residents_condominium_id
+ON public.residents(condominium_id);
+
+-- Resident app adoption reporting view.
+CREATE OR REPLACE VIEW public.v_app_adoption_stats AS
+SELECT
+  c.id AS condominium_id,
+  c.name AS condominium_name,
+  COUNT(DISTINCT u.id) AS total_units,
+  COUNT(DISTINCT r.id) AS total_residents,
+  COUNT(DISTINCT CASE WHEN r.has_app_installed THEN r.id END) AS residents_with_app,
+  COUNT(DISTINCT CASE WHEN r.has_app_installed THEN u.id END) AS units_with_app,
+  ROUND(
+    (
+      COUNT(DISTINCT CASE WHEN r.has_app_installed THEN r.id END)::NUMERIC
+      / NULLIF(COUNT(DISTINCT r.id), 0)::NUMERIC
+    ) * 100,
+    1
+  ) AS resident_adoption_percent,
+  ROUND(
+    (
+      COUNT(DISTINCT CASE WHEN r.has_app_installed THEN u.id END)::NUMERIC
+      / NULLIF(COUNT(DISTINCT u.id), 0)::NUMERIC
+    ) * 100,
+    1
+  ) AS unit_coverage_percent
+FROM public.condominiums c
+LEFT JOIN public.units u ON u.condominium_id = c.id
+LEFT JOIN public.residents r ON r.unit_id = u.id
+GROUP BY c.id, c.name
+ORDER BY condominium_name;
+
+COMMENT ON VIEW public.v_app_adoption_stats IS 'Statistics on resident app adoption per condominium';
+
+-- OTP tables, supporting functions, and rate-limiting trigger.
+CREATE TABLE IF NOT EXISTS public.otp_codes (
+  id SERIAL PRIMARY KEY,
+  phone TEXT NOT NULL,
+  code TEXT NOT NULL,
+  purpose TEXT NOT NULL,
+  resident_id INTEGER REFERENCES public.residents(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  expires_at TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '10 minutes'),
+  used_at TIMESTAMPTZ,
+  attempts INTEGER DEFAULT 0,
+  max_attempts INTEGER DEFAULT 3,
+  ip_address TEXT,
+  user_agent TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_otp_codes_phone ON public.otp_codes(phone);
+CREATE INDEX IF NOT EXISTS idx_otp_codes_expires_at ON public.otp_codes(expires_at);
+CREATE INDEX IF NOT EXISTS idx_otp_codes_resident_id ON public.otp_codes(resident_id);
+
+CREATE OR REPLACE FUNCTION public.cleanup_expired_otps()
+RETURNS INTEGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  deleted_count INTEGER;
+BEGIN
+  DELETE FROM public.otp_codes
+  WHERE expires_at < NOW() - INTERVAL '1 day';
+
+  GET DIAGNOSTICS deleted_count = ROW_COUNT;
+  RETURN deleted_count;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.check_otp_rate_limit()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  recent_count INTEGER;
+BEGIN
+  SELECT COUNT(*) INTO recent_count
+  FROM public.otp_codes
+  WHERE phone = NEW.phone
+    AND created_at > NOW() - INTERVAL '1 hour';
+
+  IF recent_count >= 5 THEN
+    RAISE EXCEPTION 'Muitas tentativas. Aguarde 1 hora antes de solicitar novo codigo.';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trigger_otp_rate_limit ON public.otp_codes;
+
+CREATE TRIGGER trigger_otp_rate_limit
+BEFORE INSERT ON public.otp_codes
+FOR EACH ROW
+EXECUTE FUNCTION public.check_otp_rate_limit();
+
+COMMENT ON TABLE public.otp_codes IS 'Armazena codigos OTP temporarios para verificacao de telefone e reset de PIN';
+COMMENT ON COLUMN public.otp_codes.purpose IS 'Tipo de operacao: RESET_PIN, VERIFY_PHONE, etc.';
+COMMENT ON COLUMN public.otp_codes.attempts IS 'Numero de tentativas de validacao do codigo';
+COMMENT ON COLUMN public.otp_codes.max_attempts IS 'Maximo de tentativas permitidas antes de invalidar o codigo';
+
+-- Visitor photo toggle support on condominiums.
+ALTER TABLE public.condominiums
+ADD COLUMN IF NOT EXISTS visitor_photo_enabled BOOLEAN NOT NULL DEFAULT true;
+
+-- ============================================================
+-- 2. Compatibility Reconciliation
+-- ============================================================
+
+-- Rename public overloads that are unsafe for Supabase/PostgREST RPC routing.
+DO $$
+BEGIN
+  IF to_regprocedure('public.admin_get_all_news(integer)') IS NOT NULL
+    AND to_regprocedure('public.admin_get_all_news_legacy(integer)') IS NULL THEN
+    EXECUTE 'ALTER FUNCTION public.admin_get_all_news(integer) RENAME TO admin_get_all_news_legacy';
+  END IF;
+END
+$$;
+
+DO $$
+BEGIN
+  IF to_regprocedure('public.admin_get_condominium_subscriptions()') IS NOT NULL
+    AND to_regprocedure('public.admin_get_condominium_subscriptions_with_alerts_sent()') IS NULL THEN
+    EXECUTE 'ALTER FUNCTION public.admin_get_condominium_subscriptions() RENAME TO admin_get_condominium_subscriptions_with_alerts_sent';
+  END IF;
+END
+$$;
+
+DO $$
+BEGIN
+  IF to_regprocedure('public.get_notifications(integer)') IS NOT NULL
+    AND to_regprocedure('public.get_notifications_legacy(integer)') IS NULL THEN
+    EXECUTE 'ALTER FUNCTION public.get_notifications(integer) RENAME TO get_notifications_legacy';
+  END IF;
+END
+$$;
+
+DO $$
+BEGIN
+  IF to_regprocedure('public.mark_notification_read(integer)') IS NOT NULL
+    AND to_regprocedure('public.mark_notification_read_unscoped(integer)') IS NULL THEN
+    EXECUTE 'ALTER FUNCTION public.mark_notification_read(integer) RENAME TO mark_notification_read_unscoped';
+  END IF;
+END
+$$;
+
+-- ============================================================
+-- 3. Canonical Public RPC Catalog
+-- verify-rpc-signatures.js parses only the block below.
+-- ============================================================-- BEGIN CANONICAL RPC CATALOG
+-- ============================================================
 -- All RPC Functions - EntryFlow (Supabase/PostgreSQL)
 -- Generated: 2026-03-28
 -- Total functions: 178
@@ -299,7 +581,7 @@ declare
   v_pin_hash text;
 begin
   if length(p_pin_cleartext) < 4 or length(p_pin_cleartext) > 6 then
-    raise exception 'PIN deve ter entre 4 e 6 dígitos';
+    raise exception 'PIN deve ter entre 4 e 6 dÃƒÂ­gitos';
   end if;
 
   v_pin_hash := crypt(p_pin_cleartext, gen_salt('bf', 10));
@@ -758,9 +1040,9 @@ $function$
 ;
 
 -- ----------------------------------------
--- Function: admin_get_all_news
+-- Function: admin_get_all_news_legacy
 -- ----------------------------------------
-CREATE OR REPLACE FUNCTION public.admin_get_all_news(p_condominium_id integer DEFAULT NULL::integer)
+CREATE OR REPLACE FUNCTION public.admin_get_all_news_legacy(p_condominium_id integer DEFAULT NULL::integer)
  RETURNS SETOF condominium_news
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -1058,9 +1340,9 @@ $function$
 ;
 
 -- ----------------------------------------
--- Function: admin_get_condominium_subscriptions
+-- Function: admin_get_condominium_subscriptions_with_alerts_sent
 -- ----------------------------------------
-CREATE OR REPLACE FUNCTION public.admin_get_condominium_subscriptions()
+CREATE OR REPLACE FUNCTION public.admin_get_condominium_subscriptions_with_alerts_sent()
  RETURNS TABLE(id bigint, condominium_id bigint, status text, custom_price_per_resident numeric, discount_percentage numeric, last_payment_date date, next_due_date date, created_at timestamp with time zone, updated_at timestamp with time zone, condominium_name text, current_residents_count bigint, payment_status text, months_in_arrears bigint, missing_months_list text, arrears_details jsonb, alerts_sent bigint)
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -1515,7 +1797,7 @@ BEGIN
     IF v_alerts_this_month > 0 THEN
         RETURN jsonb_build_object(
             'success', false,
-            'message', 'Já foi enviado um alerta para este condomínio neste mês. Limite de 1 alerta por mês.'
+            'message', 'JÃƒÂ¡ foi enviado um alerta para este condomÃƒÂ­nio neste mÃƒÂªs. Limite de 1 alerta por mÃƒÂªs.'
         );
     END IF;
     -- Record the new alert
@@ -1940,7 +2222,7 @@ declare
   v_row public.staff;
 begin
   if length(p_pin_cleartext) < 4 or length(p_pin_cleartext) > 6 then
-    raise exception 'PIN deve ter entre 4 e 6 dígitos';
+    raise exception 'PIN deve ter entre 4 e 6 dÃƒÂ­gitos';
   end if;
 
   update public.staff
@@ -3047,9 +3329,9 @@ $function$
 ;
 
 -- ----------------------------------------
--- Function: get_notifications
+-- Function: get_notifications_legacy
 -- ----------------------------------------
-CREATE OR REPLACE FUNCTION public.get_notifications(p_resident_id integer)
+CREATE OR REPLACE FUNCTION public.get_notifications_legacy(p_resident_id integer)
  RETURNS SETOF notifications
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -3171,6 +3453,25 @@ BEGIN
   FROM public.residents r
   WHERE r.id = p_resident_id
   LIMIT 1;
+END;
+$function$
+;
+
+-- ----------------------------------------
+-- Function: get_residents_by_condominium
+-- ----------------------------------------
+CREATE OR REPLACE FUNCTION public.get_residents_by_condominium(p_condominium_id integer)
+ RETURNS SETOF residents
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+BEGIN
+  RETURN QUERY
+  SELECT *
+  FROM public.residents
+  WHERE condominium_id = p_condominium_id
+  ORDER BY name;
 END;
 $function$
 ;
@@ -3796,9 +4097,9 @@ $function$
 ;
 
 -- ----------------------------------------
--- Function: mark_notification_read
+-- Function: mark_notification_read_unscoped
 -- ----------------------------------------
-CREATE OR REPLACE FUNCTION public.mark_notification_read(p_notification_id integer)
+CREATE OR REPLACE FUNCTION public.mark_notification_read_unscoped(p_notification_id integer)
  RETURNS void
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -3897,19 +4198,19 @@ AS $function$DECLARE
   v_resident_id INTEGER;
   v_pin_hash TEXT;
 BEGIN
-  -- Validações
+  -- ValidaÃƒÂ§ÃƒÂµes
   IF LENGTH(p_pin_cleartext) < 4 OR LENGTH(p_pin_cleartext) > 6 THEN
-    RAISE EXCEPTION 'PIN deve ter entre 4 e 6 dígitos';
+    RAISE EXCEPTION 'PIN deve ter entre 4 e 6 dÃƒÂ­gitos';
   END IF;
 
   IF p_phone IS NULL OR LENGTH(TRIM(p_phone)) = 0 THEN
-    RAISE EXCEPTION 'Telefone é obrigatório';
+    RAISE EXCEPTION 'Telefone ÃƒÂ© obrigatÃƒÂ³rio';
   END IF;
 
-  -- Normaliza telefone (remove espaços, traços, etc)
+  -- Normaliza telefone (remove espaÃƒÂ§os, traÃƒÂ§os, etc)
   p_phone := REGEXP_REPLACE(p_phone, '[^0-9]', '', 'g');
 
-  -- Verifica se residente existe e ainda não tem PIN
+  -- Verifica se residente existe e ainda nÃƒÂ£o tem PIN
   SELECT r.id INTO v_resident_id
   FROM residents r
   WHERE r.phone = p_phone
@@ -3917,7 +4218,7 @@ BEGIN
   LIMIT 1;
 
   IF v_resident_id IS NULL THEN
-    RAISE EXCEPTION 'Telefone não encontrado ou já possui PIN cadastrado. Entre em contato com a administração.';
+    RAISE EXCEPTION 'Telefone nÃƒÂ£o encontrado ou jÃƒÂ¡ possui PIN cadastrado. Entre em contato com a administraÃƒÂ§ÃƒÂ£o.';
   END IF;
 
   -- Gera hash bcrypt do PIN
@@ -3967,7 +4268,7 @@ BEGIN
 
   -- Valida telefone
   IF v_normalized_phone IS NULL OR LENGTH(v_normalized_phone) < 9 THEN
-    RAISE EXCEPTION 'Telefone inválido';
+    RAISE EXCEPTION 'Telefone invÃƒÂ¡lido';
   END IF;
 
   -- Busca residente por telefone
@@ -3977,19 +4278,19 @@ BEGIN
   LIMIT 1;
 
   IF v_resident.id IS NULL THEN
-    -- Por segurança, não revela se telefone existe ou não
-    RAISE EXCEPTION 'Se o telefone estiver cadastrado, você receberá um SMS com o código.';
+    -- Por seguranÃƒÂ§a, nÃƒÂ£o revela se telefone existe ou nÃƒÂ£o
+    RAISE EXCEPTION 'Se o telefone estiver cadastrado, vocÃƒÂª receberÃƒÂ¡ um SMS com o cÃƒÂ³digo.';
   END IF;
 
-  -- Verifica se residente já tem PIN (não pode resetar se nunca configurou)
+  -- Verifica se residente jÃƒÂ¡ tem PIN (nÃƒÂ£o pode resetar se nunca configurou)
   IF v_resident.pin_hash IS NULL OR v_resident.pin_hash = '' THEN
-    RAISE EXCEPTION 'PIN não cadastrado. Realize o primeiro acesso através da opção "Primeiro Acesso".';
+    RAISE EXCEPTION 'PIN nÃƒÂ£o cadastrado. Realize o primeiro acesso atravÃƒÂ©s da opÃƒÂ§ÃƒÂ£o "Primeiro Acesso".';
   END IF;
 
-  -- Gera código OTP de 6 dígitos
+  -- Gera cÃƒÂ³digo OTP de 6 dÃƒÂ­gitos
   v_otp_code := LPAD(FLOOR(RANDOM() * 1000000)::TEXT, 6, '0');
 
-  -- Insere OTP na tabela (trigger irá validar rate limit)
+  -- Insere OTP na tabela (trigger irÃƒÂ¡ validar rate limit)
   INSERT INTO otp_codes (
     phone,
     code,
@@ -4008,9 +4309,9 @@ BEGIN
   )
   RETURNING id INTO v_otp_id;
 
-  -- TODO: Integração com serviço de SMS (Twilio, AWS SNS, etc.)
-  -- Por ora, apenas retorna o código (em produção, remover isso!)
-  -- PERFORM send_sms(v_normalized_phone, 'Seu código de verificação Elite AccesControl: ' || v_otp_code);
+  -- TODO: IntegraÃƒÂ§ÃƒÂ£o com serviÃƒÂ§o de SMS (Twilio, AWS SNS, etc.)
+  -- Por ora, apenas retorna o cÃƒÂ³digo (em produÃƒÂ§ÃƒÂ£o, remover isso!)
+  -- PERFORM send_sms(v_normalized_phone, 'Seu cÃƒÂ³digo de verificaÃƒÂ§ÃƒÂ£o Elite AccesControl: ' || v_otp_code);
 
   -- Log (opcional)
   RAISE NOTICE 'OTP gerado para telefone %: % (ID: %)', v_normalized_phone, v_otp_code, v_otp_id;
@@ -4020,7 +4321,7 @@ BEGIN
     v_otp_id,
     v_normalized_phone,
     600, -- 10 minutos em segundos
-    'Código enviado por SMS. Válido por 10 minutos.'::TEXT;
+    'CÃƒÂ³digo enviado por SMS. VÃƒÂ¡lido por 10 minutos.'::TEXT;
 END;
 $function$
 ;
@@ -4044,10 +4345,10 @@ BEGIN
 
   -- Valida novo PIN
   IF LENGTH(p_new_pin) < 4 OR LENGTH(p_new_pin) > 6 OR p_new_pin !~ '^\d+$' THEN
-    RAISE EXCEPTION 'PIN deve ter entre 4 e 6 dígitos numéricos';
+    RAISE EXCEPTION 'PIN deve ter entre 4 e 6 dÃƒÂ­gitos numÃƒÂ©ricos';
   END IF;
 
-  -- Busca OTP mais recente e ainda válido
+  -- Busca OTP mais recente e ainda vÃƒÂ¡lido
   SELECT * INTO v_otp
   FROM otp_codes
   WHERE phone = v_normalized_phone
@@ -4060,7 +4361,7 @@ BEGIN
 
   -- Verifica se OTP existe
   IF v_otp.id IS NULL THEN
-    RAISE EXCEPTION 'Código inválido, expirado ou já utilizado. Solicite um novo código.';
+    RAISE EXCEPTION 'CÃƒÂ³digo invÃƒÂ¡lido, expirado ou jÃƒÂ¡ utilizado. Solicite um novo cÃƒÂ³digo.';
   END IF;
 
   -- Incrementa tentativas
@@ -4068,18 +4369,18 @@ BEGIN
   SET attempts = attempts + 1
   WHERE id = v_otp.id;
 
-  -- Verifica se código está correto
+  -- Verifica se cÃƒÂ³digo estÃƒÂ¡ correto
   IF v_otp.code != p_otp_code THEN
-    -- Se atingiu máximo de tentativas, invalida o OTP
+    -- Se atingiu mÃƒÂ¡ximo de tentativas, invalida o OTP
     IF v_otp.attempts + 1 >= v_otp.max_attempts THEN
       UPDATE otp_codes
       SET used_at = NOW()
       WHERE id = v_otp.id;
 
-      RAISE EXCEPTION 'Código incorreto. Máximo de tentativas atingido. Solicite um novo código.';
+      RAISE EXCEPTION 'CÃƒÂ³digo incorreto. MÃƒÂ¡ximo de tentativas atingido. Solicite um novo cÃƒÂ³digo.';
     END IF;
 
-    RAISE EXCEPTION 'Código incorreto. Tentativa % de %.', v_otp.attempts + 1, v_otp.max_attempts;
+    RAISE EXCEPTION 'CÃƒÂ³digo incorreto. Tentativa % de %.', v_otp.attempts + 1, v_otp.max_attempts;
   END IF;
 
   -- Busca residente
@@ -4088,7 +4389,7 @@ BEGIN
   WHERE id = v_otp.resident_id;
 
   IF v_resident.id IS NULL THEN
-    RAISE EXCEPTION 'Residente não encontrado';
+    RAISE EXCEPTION 'Residente nÃƒÂ£o encontrado';
   END IF;
 
   -- Gera hash bcrypt do novo PIN
@@ -4106,7 +4407,7 @@ BEGIN
   SET used_at = NOW()
   WHERE id = v_otp.id;
 
-  -- Invalida todos os outros OTPs deste residente (segurança)
+  -- Invalida todos os outros OTPs deste residente (seguranÃƒÂ§a)
   UPDATE otp_codes
   SET used_at = NOW()
   WHERE resident_id = v_resident.id
@@ -4165,6 +4466,22 @@ BEGIN
       updated_at = now()
   WHERE id = p_qr_id
   RETURNING *;
+END;
+$function$
+;
+
+-- ----------------------------------------
+-- Function: set_condo_visitor_photo_setting
+-- ----------------------------------------
+CREATE OR REPLACE FUNCTION public.set_condo_visitor_photo_setting(p_condo_id integer, p_enabled boolean)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+AS $function$
+BEGIN
+  UPDATE public.condominiums
+  SET visitor_photo_enabled = p_enabled
+  WHERE id = p_condo_id;
 END;
 $function$
 ;
@@ -4575,7 +4892,7 @@ begin
       null::text,
       null::text,
       null::text,
-      'QR code não encontrado'::text;
+      'QR code nÃƒÂ£o encontrado'::text;
     return;
   end if;
 
@@ -4589,7 +4906,7 @@ begin
       v_qr.visitor_phone,
       v_qr.purpose,
       v_qr.notes,
-      ('QR code é ' || v_qr.status)::text;
+      ('QR code ÃƒÂ© ' || v_qr.status)::text;
     return;
   end if;
 
@@ -4606,7 +4923,7 @@ begin
         v_qr.visitor_phone,
         v_qr.purpose,
         v_qr.notes,
-        'QR code não está activo'::text;
+        'QR code nÃƒÂ£o estÃƒÂ¡ activo'::text;
       return;
     end if;
 
@@ -4638,7 +4955,7 @@ begin
           v_qr.visitor_phone,
           v_qr.purpose,
           v_qr.notes,
-          'Este QR code não é válido neste dia da semana'::text;
+          'Este QR code nÃƒÂ£o ÃƒÂ© vÃƒÂ¡lido neste dia da semana'::text;
         return;
       end if;
     end if;
@@ -4668,7 +4985,7 @@ begin
     v_qr.visitor_phone,
     v_qr.purpose,
     v_qr.notes,
-    'QR code é válido'::text;
+    'QR code ÃƒÂ© vÃƒÂ¡lido'::text;
 end;
 $function$
 ;
@@ -4684,13 +5001,13 @@ AS $function$
 DECLARE
   v_resident RECORD;
 BEGIN
-  -- Validações
+  -- ValidaÃƒÂ§ÃƒÂµes
   IF p_phone IS NULL OR LENGTH(TRIM(p_phone)) = 0 THEN
-    RAISE EXCEPTION 'Telefone é obrigatório';
+    RAISE EXCEPTION 'Telefone ÃƒÂ© obrigatÃƒÂ³rio';
   END IF;
 
   IF p_pin_cleartext IS NULL OR LENGTH(TRIM(p_pin_cleartext)) = 0 THEN
-    RAISE EXCEPTION 'PIN é obrigatório';
+    RAISE EXCEPTION 'PIN ÃƒÂ© obrigatÃƒÂ³rio';
   END IF;
 
   -- Normaliza telefone
@@ -4704,12 +5021,12 @@ BEGIN
 
   -- Verifica se residente existe
   IF v_resident.id IS NULL THEN
-    RAISE EXCEPTION 'Telefone não encontrado';
+    RAISE EXCEPTION 'Telefone nÃƒÂ£o encontrado';
   END IF;
 
   -- Verifica se residente tem PIN cadastrado
   IF v_resident.pin_hash IS NULL OR v_resident.pin_hash = '' THEN
-    RAISE EXCEPTION 'PIN não cadastrado. Realize o primeiro acesso.';
+    RAISE EXCEPTION 'PIN nÃƒÂ£o cadastrado. Realize o primeiro acesso.';
   END IF;
 
   -- Verifica PIN usando bcrypt
@@ -4717,7 +5034,7 @@ BEGIN
     RAISE EXCEPTION 'PIN incorreto';
   END IF;
 
-  -- Atualiza último acesso e device token (se fornecido)
+  -- Atualiza ÃƒÂºltimo acesso e device token (se fornecido)
   UPDATE residents
   SET 
     app_last_seen_at = NOW(),
@@ -4757,7 +5074,7 @@ BEGIN
   left JOIN condominiums c ON s.condominium_id = c.id
   WHERE lower(s.first_name) = lower(p_first_name)
     AND lower(s.last_name) = lower(p_last_name)
-    AND s.pin_hash = crypt(p_pin, s.pin_hash) -- Comparação segura
+    AND s.pin_hash = crypt(p_pin, s.pin_hash) -- ComparaÃƒÂ§ÃƒÂ£o segura
     AND
     ( 
       s.role = 'SUPER_ADMIN'
@@ -4833,3 +5150,237 @@ CREATE OR REPLACE FUNCTION public.word_similarity_op(text, text)
  STABLE PARALLEL SAFE STRICT
 AS '$libdir/pg_trgm', $function$word_similarity_op$function$
 ;
+
+CREATE OR REPLACE FUNCTION public.get_resident_stats(
+  p_resident_id integer,
+  p_unit_id integer,
+  p_period text DEFAULT 'month'    -- 'week' | 'month' | 'year' | 'all'
+)
+ RETURNS TABLE(
+   period_label text,
+   visits_total integer,
+   visits_approved integer,
+   visits_denied integer,
+   visits_by_type jsonb,
+   qr_codes_generated integer,
+   qr_codes_active integer,
+   incidents_reported integer,
+   top_visitors jsonb,
+   busiest_day_of_week text,
+   busiest_hour integer,
+   prev_period_visits integer
+ )
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_start timestamptz;
+  v_end timestamptz := now();
+  v_prev_start timestamptz;
+  v_prev_end timestamptz;
+BEGIN
+  CASE p_period
+    WHEN 'week' THEN
+      v_start := date_trunc('week', now());
+      v_prev_start := v_start - interval '1 week';
+      v_prev_end := v_start;
+    WHEN 'month' THEN
+      v_start := date_trunc('month', now());
+      v_prev_start := v_start - interval '1 month';
+      v_prev_end := v_start;
+    WHEN 'year' THEN
+      v_start := date_trunc('year', now());
+      v_prev_start := v_start - interval '1 year';
+      v_prev_end := v_start;
+    ELSE
+      v_start := '1970-01-01'::timestamptz;
+      v_prev_start := v_start;
+      v_prev_end := v_start;
+  END CASE;
+
+  RETURN QUERY
+  SELECT
+    p_period,
+    (SELECT COUNT(*)::integer FROM visits WHERE unit_id = p_unit_id AND created_at >= v_start),
+    (SELECT COUNT(*)::integer FROM visits WHERE unit_id = p_unit_id AND created_at >= v_start AND status = 'AUTORIZADO'),
+    (SELECT COUNT(*)::integer FROM visits WHERE unit_id = p_unit_id AND created_at >= v_start AND status = 'NEGADO'),
+    (SELECT COALESCE(jsonb_object_agg(type_name, cnt), '{}'::jsonb) FROM
+      (SELECT vt.name AS type_name, COUNT(*)::integer AS cnt
+       FROM visits v
+       LEFT JOIN visit_types vt ON v.visit_type_id = vt.id
+       WHERE v.unit_id = p_unit_id AND v.created_at >= v_start
+       GROUP BY vt.name) sub),
+    (SELECT COUNT(*)::integer FROM resident_qr_codes WHERE resident_id = p_resident_id AND created_at >= v_start),
+    (SELECT COUNT(*)::integer
+     FROM resident_qr_codes
+     WHERE resident_id = p_resident_id
+       AND status = 'active'
+       AND (expires_at IS NULL OR expires_at > NOW())),
+    (SELECT COUNT(*)::integer FROM incidents WHERE resident_id = p_resident_id AND reported_at >= v_start),
+    (SELECT COALESCE(jsonb_agg(jsonb_build_object('name', visitor_name, 'phone', visitor_phone, 'count', cnt)), '[]'::jsonb)
+     FROM (SELECT visitor_name, visitor_phone, COUNT(*)::integer AS cnt
+           FROM visits
+           WHERE unit_id = p_unit_id AND created_at >= v_start AND visitor_name IS NOT NULL
+           GROUP BY visitor_name, visitor_phone
+           ORDER BY cnt DESC LIMIT 5) top),
+    (SELECT TO_CHAR(created_at, 'FMDay') FROM visits
+     WHERE unit_id = p_unit_id AND created_at >= v_start
+     GROUP BY TO_CHAR(created_at, 'FMDay')
+     ORDER BY COUNT(*) DESC LIMIT 1),
+    (SELECT EXTRACT(HOUR FROM created_at)::integer FROM visits
+     WHERE unit_id = p_unit_id AND created_at >= v_start
+     GROUP BY EXTRACT(HOUR FROM created_at)
+     ORDER BY COUNT(*) DESC LIMIT 1),
+    (SELECT COUNT(*)::integer FROM visits
+     WHERE unit_id = p_unit_id AND created_at >= v_prev_start AND created_at < v_prev_end);
+END;
+$function$;
+
+
+CREATE INDEX IF NOT EXISTS idx_visits_unit_created_at
+ON public.visits (unit_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_visits_unit_created_status
+ON public.visits (unit_id, created_at DESC, status);
+
+CREATE INDEX IF NOT EXISTS idx_resident_qr_codes_resident_created_at
+ON public.resident_qr_codes (resident_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_resident_qr_codes_resident_status_expires
+ON public.resident_qr_codes (resident_id, status, expires_at);
+
+CREATE INDEX IF NOT EXISTS idx_incidents_resident_reported_at
+ON public.incidents (resident_id, reported_at DESC);
+
+
+CREATE OR REPLACE FUNCTION public.upsert_frequent_visitor(
+  p_resident_id integer,
+  p_name text,
+  p_phone text,
+  p_purpose text DEFAULT 'guest',
+  p_notes text DEFAULT NULL
+)
+ RETURNS uuid
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+AS $function$
+DECLARE
+  v_id uuid;
+BEGIN
+  INSERT INTO public.resident_frequent_visitors (resident_id, name, phone, purpose, notes)
+  VALUES (p_resident_id, p_name, p_phone, p_purpose, p_notes)
+  ON CONFLICT (resident_id, phone)
+  DO UPDATE SET
+    name = EXCLUDED.name,
+    purpose = EXCLUDED.purpose,
+    notes = COALESCE(EXCLUDED.notes, resident_frequent_visitors.notes),
+    updated_at = now()
+  RETURNING id INTO v_id;
+  RETURN v_id;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.increment_frequent_visitor_usage(
+  p_resident_id integer,
+  p_phone text
+)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+AS $function$
+BEGIN
+  UPDATE public.resident_frequent_visitors
+  SET use_count = use_count + 1,
+      last_used_at = now(),
+      updated_at = now()
+  WHERE resident_id = p_resident_id AND phone = p_phone;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.delete_frequent_visitor(
+  p_id uuid,
+  p_resident_id integer
+)
+ RETURNS boolean
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+AS $function$
+BEGIN
+  DELETE FROM public.resident_frequent_visitors
+  WHERE id = p_id AND resident_id = p_resident_id;
+  RETURN FOUND;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.update_frequent_visitor(
+  p_id uuid,
+  p_resident_id integer,
+  p_name text DEFAULT NULL,
+  p_phone text DEFAULT NULL,
+  p_purpose text DEFAULT NULL,
+  p_notes text DEFAULT NULL
+)
+ RETURNS SETOF resident_frequent_visitors
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+AS $function$
+BEGIN
+  RETURN QUERY
+  UPDATE public.resident_frequent_visitors
+  SET
+    name = COALESCE(p_name, name),
+    phone = COALESCE(p_phone, phone),
+    purpose = COALESCE(p_purpose, purpose),
+    notes = COALESCE(p_notes, notes),
+    updated_at = now()
+  WHERE id = p_id AND resident_id = p_resident_id
+  RETURNING *;
+END;
+$function$;
+
+CREATE TABLE IF NOT EXISTS public.resident_frequent_visitors (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  resident_id integer NOT NULL REFERENCES public.residents(id) ON DELETE CASCADE,
+  name text NOT NULL,
+  phone text NOT NULL,
+  purpose text DEFAULT 'guest' CHECK (purpose IN ('guest', 'delivery', 'service', 'other')),
+  notes text,
+  avatar_url text,
+  use_count integer DEFAULT 0,
+  last_used_at timestamp with time zone,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_frequent_visitors_resident_id
+  ON public.resident_frequent_visitors(resident_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_frequent_visitors_unique
+  ON public.resident_frequent_visitors(resident_id, phone);
+
+CREATE OR REPLACE FUNCTION public.get_frequent_visitors(p_resident_id integer)
+ RETURNS TABLE(
+   id uuid,
+   name text,
+   phone text,
+   purpose text,
+   notes text,
+   avatar_url text,
+   use_count integer,
+   last_used_at timestamptz,
+   created_at timestamptz
+ )
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+AS $function$
+BEGIN
+  RETURN QUERY
+  SELECT fv.id, fv.name, fv.phone, fv.purpose, fv.notes, fv.avatar_url,
+    fv.use_count, fv.last_used_at, fv.created_at
+  FROM public.resident_frequent_visitors fv
+  WHERE fv.resident_id = p_resident_id
+  ORDER BY fv.use_count DESC, fv.last_used_at DESC NULLS LAST;
+END;
+$function$;
+-- END CANONICAL RPC CATALOG

@@ -18,10 +18,7 @@
     "preview": {
       "distribution": "internal",
       "channel": "preview",
-      "autoIncrement": true,
-      "env": {
-        "SENTRY_DISABLE_AUTO_UPLOAD": "true"
-      }
+      "autoIncrement": true
     },
     "production": {
       "channel": "production",

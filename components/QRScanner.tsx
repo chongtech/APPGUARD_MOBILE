@@ -8,5 +8,12 @@ interface Props {
 }
 
 export function QRScanner({ visible, onScan, onClose }: Props) {
-  return <CameraCapture visible={visible} mode="qr" onScan={onScan} onClose={onClose} />;
+  return (
+    <CameraCapture
+      visible={visible}
+      mode="qr"
+      onScan={onScan}
+      onClose={onClose}
+    />
+  );
 }
