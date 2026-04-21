@@ -1,5 +1,15 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
-import { View, FlatList, Pressable, StyleSheet, ActivityIndicator, Alert, TextInput, Modal, ScrollView } from "react-native";
+import {
+  View,
+  FlatList,
+  Pressable,
+  StyleSheet,
+  ActivityIndicator,
+  Alert,
+  TextInput,
+  Modal,
+  ScrollView,
+} from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -31,89 +41,282 @@ export default function AdminNews() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    try { setItems(await api.adminGetAllNews()); } catch (loadError) { logger.warn(LogCategory.UI, "AdminNews: load failed", { error: String(loadError) }); } finally { setLoading(false); }
+    try {
+      setItems(await api.adminGetAllNews());
+    } catch (loadError) {
+      logger.warn(LogCategory.UI, "AdminNews: load failed", {
+        error: String(loadError),
+      });
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
-  const filtered = useMemo(() => items.filter((n) => n.title.toLowerCase().includes(search.toLowerCase())), [items, search]);
+  useEffect(() => {
+    load();
+  }, [load]);
+  const filtered = useMemo(
+    () =>
+      items.filter((n) => n.title.toLowerCase().includes(search.toLowerCase())),
+    [items, search],
+  );
 
   const openCreate = () => {
-    setEditing(null); setTitle(""); setContent(""); setCategoryName(""); setImageUrl(""); setCondoId(""); setModalOpen(true);
+    setEditing(null);
+    setTitle("");
+    setContent("");
+    setCategoryName("");
+    setImageUrl("");
+    setCondoId("");
+    setModalOpen(true);
   };
   const openEdit = (n: CondominiumNews) => {
-    setEditing(n); setTitle(n.title); setContent(n.content ?? "");
-    setCategoryName(n.category_name ?? ""); setImageUrl(n.image_url ?? ""); setCondoId(String(n.condominium_id)); setModalOpen(true);
+    setEditing(n);
+    setTitle(n.title);
+    setContent(n.content ?? "");
+    setCategoryName(n.category_name ?? "");
+    setImageUrl(n.image_url ?? "");
+    setCondoId(String(n.condominium_id));
+    setModalOpen(true);
   };
 
   const handleSave = async () => {
     if (!title.trim()) return Alert.alert("Erro", "Título obrigatório.");
     setSaving(true);
     try {
-      const p = { title: title.trim(), content: content.trim() || undefined, category_name: categoryName.trim() || undefined, image_url: imageUrl.trim() || undefined, condominium_id: Number(condoId) };
+      const p = {
+        title: title.trim(),
+        content: content.trim() || undefined,
+        category_name: categoryName.trim() || undefined,
+        image_url: imageUrl.trim() || undefined,
+        condominium_id: Number(condoId),
+      };
       if (editing) await api.adminUpdateNews(editing.id, p);
       else await api.adminCreateNews(p);
-      setModalOpen(false); load();
-    } catch (e: unknown) { logger.error(LogCategory.UI, "AdminNews: save failed", e instanceof Error ? e : new Error(String(e))); Alert.alert("Erro", (e as Error).message); } finally { setSaving(false); }
+      setModalOpen(false);
+      load();
+    } catch (e: unknown) {
+      logger.error(
+        LogCategory.UI,
+        "AdminNews: save failed",
+        e instanceof Error ? e : new Error(String(e)),
+      );
+      Alert.alert("Erro", (e as Error).message);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleDelete = (n: CondominiumNews) => {
     Alert.alert("Eliminar", `Eliminar "${n.title}"?`, [
       { text: "Cancelar", style: "cancel" },
-      { text: "Eliminar", style: "destructive", onPress: async () => { await api.adminDeleteNews(n.id); load(); } },
+      {
+        text: "Eliminar",
+        style: "destructive",
+        onPress: async () => {
+          await api.adminDeleteNews(n.id);
+          load();
+        },
+      },
     ]);
   };
 
   return (
     <ThemedView style={styles.container}>
-      <View style={[styles.header, { backgroundColor: theme.cardBackground, borderBottomColor: theme.border }]}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.backBtn}><Feather name="arrow-left" size={22} color={theme.text} /></Pressable>
+      <View
+        style={[
+          styles.header,
+          {
+            backgroundColor: theme.cardBackground,
+            borderBottomColor: theme.border,
+          },
+        ]}
+      >
+        <Pressable onPress={() => navigation.goBack()} style={styles.backBtn}>
+          <Feather name="arrow-left" size={22} color={theme.text} />
+        </Pressable>
         <ThemedText type="h3">Notícias</ThemedText>
-        <Pressable onPress={load} style={styles.refreshBtn}><Feather name="refresh-cw" size={20} color={theme.textSecondary} /></Pressable>
+        <Pressable onPress={load} style={styles.refreshBtn}>
+          <Feather name="refresh-cw" size={20} color={theme.textSecondary} />
+        </Pressable>
       </View>
-      <View style={[styles.searchRow, { backgroundColor: theme.backgroundSecondary, borderColor: theme.border }]}>
+      <View
+        style={[
+          styles.searchRow,
+          {
+            backgroundColor: theme.backgroundSecondary,
+            borderColor: theme.border,
+          },
+        ]}
+      >
         <Feather name="search" size={16} color={theme.textSecondary} />
-        <TextInput style={{ flex: 1, color: theme.text }} placeholder="Pesquisar..." placeholderTextColor={theme.textSecondary} value={search} onChangeText={setSearch} />
+        <TextInput
+          style={{ flex: 1, color: theme.text }}
+          placeholder="Pesquisar..."
+          placeholderTextColor={theme.textSecondary}
+          value={search}
+          onChangeText={setSearch}
+        />
       </View>
-      {loading ? <View style={styles.center}><ActivityIndicator color={BrandColors.primary} /></View> : (
-        <FlatList data={filtered} keyExtractor={(n) => String(n.id)} contentContainerStyle={{ padding: Spacing.md, gap: Spacing.sm }}
-          ListEmptyComponent={<View style={styles.center}><ThemedText style={{ color: theme.textSecondary }}>Sem notícias</ThemedText></View>}
+      {loading ? (
+        <View style={styles.center}>
+          <ActivityIndicator color={BrandColors.primary} />
+        </View>
+      ) : (
+        <FlatList
+          data={filtered}
+          keyExtractor={(n) => String(n.id)}
+          contentContainerStyle={{ padding: Spacing.md, gap: Spacing.sm }}
+          ListEmptyComponent={
+            <View style={styles.center}>
+              <ThemedText style={{ color: theme.textSecondary }}>
+                Sem notícias
+              </ThemedText>
+            </View>
+          }
           renderItem={({ item: n }) => (
-            <View style={[styles.card, { backgroundColor: theme.cardBackground, borderColor: theme.border }]}>
+            <View
+              style={[
+                styles.card,
+                {
+                  backgroundColor: theme.cardBackground,
+                  borderColor: theme.border,
+                },
+              ]}
+            >
               <View style={styles.cardRow}>
                 <View style={{ flex: 1 }}>
                   <ThemedText type="h4">{n.title}</ThemedText>
-                  {n.category_name && <View style={styles.catBadge}><ThemedText type="small" style={{ color: BrandColors.primary, fontWeight: "700" }}>{n.category_name}</ThemedText></View>}
-                  <ThemedText type="small" style={{ color: theme.textSecondary }}>Condo #{n.condominium_id}</ThemedText>
+                  {n.category_name && (
+                    <View style={styles.catBadge}>
+                      <ThemedText
+                        type="small"
+                        style={{
+                          color: BrandColors.primary,
+                          fontWeight: "700",
+                        }}
+                      >
+                        {n.category_name}
+                      </ThemedText>
+                    </View>
+                  )}
+                  <ThemedText
+                    type="small"
+                    style={{ color: theme.textSecondary }}
+                  >
+                    Condo #{n.condominium_id}
+                  </ThemedText>
                 </View>
-                <Pressable onPress={() => openEdit(n)} style={styles.iconBtn}><Feather name="edit-2" size={16} color={BrandColors.primary} /></Pressable>
-                <Pressable onPress={() => handleDelete(n)} style={styles.iconBtn}><Feather name="trash-2" size={16} color="#EF4444" /></Pressable>
+                <Pressable onPress={() => openEdit(n)} style={styles.iconBtn}>
+                  <Feather
+                    name="edit-2"
+                    size={16}
+                    color={BrandColors.primary}
+                  />
+                </Pressable>
+                <Pressable
+                  onPress={() => handleDelete(n)}
+                  style={styles.iconBtn}
+                >
+                  <Feather name="trash-2" size={16} color="#EF4444" />
+                </Pressable>
               </View>
             </View>
-          )} />
+          )}
+        />
       )}
-      <Pressable style={styles.fab} onPress={openCreate}><Feather name="plus" size={24} color="#fff" /></Pressable>
-      <Modal visible={modalOpen} animationType="slide" transparent onRequestClose={() => setModalOpen(false)}>
+      <Pressable style={styles.fab} onPress={openCreate}>
+        <Feather name="plus" size={24} color="#fff" />
+      </Pressable>
+      <Modal
+        visible={modalOpen}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setModalOpen(false)}
+      >
         <View style={styles.overlay}>
-          <View style={[styles.sheet, { backgroundColor: theme.backgroundDefault }]}>
+          <View
+            style={[styles.sheet, { backgroundColor: theme.backgroundDefault }]}
+          >
             <View style={styles.sheetHeader}>
-              <ThemedText type="h3">{editing ? "Editar Notícia" : "Nova Notícia"}</ThemedText>
-              <Pressable onPress={() => setModalOpen(false)}><Feather name="x" size={22} color={theme.textSecondary} /></Pressable>
+              <ThemedText type="h3">
+                {editing ? "Editar Notícia" : "Nova Notícia"}
+              </ThemedText>
+              <Pressable onPress={() => setModalOpen(false)}>
+                <Feather name="x" size={22} color={theme.textSecondary} />
+              </Pressable>
             </View>
-            <ScrollView contentContainerStyle={{ gap: Spacing.md, padding: Spacing.lg }}>
-              {([["Título *", title, setTitle], ["Categoria", categoryName, setCategoryName], ["URL Imagem", imageUrl, setImageUrl], ["Condo ID *", condoId, setCondoId]] as [string, string, (t: string) => void][]).map(([label, value, set]) => (
+            <ScrollView
+              contentContainerStyle={{ gap: Spacing.md, padding: Spacing.lg }}
+            >
+              {(
+                [
+                  ["Título *", title, setTitle],
+                  ["Categoria", categoryName, setCategoryName],
+                  ["URL Imagem", imageUrl, setImageUrl],
+                  ["Condo ID *", condoId, setCondoId],
+                ] as [string, string, (t: string) => void][]
+              ).map(([label, value, set]) => (
                 <View key={label}>
-                  <ThemedText type="small" style={{ color: theme.textSecondary, marginBottom: 4 }}>{label}</ThemedText>
-                  <TextInput style={[styles.input, { borderColor: theme.border, color: theme.text, backgroundColor: theme.backgroundSecondary }]}
-                    value={value} onChangeText={set} keyboardType={label.includes("ID") ? "number-pad" : "default"} />
+                  <ThemedText
+                    type="small"
+                    style={{ color: theme.textSecondary, marginBottom: 4 }}
+                  >
+                    {label}
+                  </ThemedText>
+                  <TextInput
+                    style={[
+                      styles.input,
+                      {
+                        borderColor: theme.border,
+                        color: theme.text,
+                        backgroundColor: theme.backgroundSecondary,
+                      },
+                    ]}
+                    value={value}
+                    onChangeText={set}
+                    keyboardType={
+                      label.includes("ID") ? "number-pad" : "default"
+                    }
+                  />
                 </View>
               ))}
               <View>
-                <ThemedText type="small" style={{ color: theme.textSecondary, marginBottom: 4 }}>Conteúdo</ThemedText>
-                <TextInput style={[styles.input, { borderColor: theme.border, color: theme.text, backgroundColor: theme.backgroundSecondary, minHeight: 100, textAlignVertical: "top" }]}
-                  value={content} onChangeText={setContent} multiline numberOfLines={4} />
+                <ThemedText
+                  type="small"
+                  style={{ color: theme.textSecondary, marginBottom: 4 }}
+                >
+                  Conteúdo
+                </ThemedText>
+                <TextInput
+                  style={[
+                    styles.input,
+                    {
+                      borderColor: theme.border,
+                      color: theme.text,
+                      backgroundColor: theme.backgroundSecondary,
+                      minHeight: 100,
+                      textAlignVertical: "top",
+                    },
+                  ]}
+                  value={content}
+                  onChangeText={setContent}
+                  multiline
+                  numberOfLines={4}
+                />
               </View>
-              <Pressable style={[styles.saveBtn, { opacity: saving ? 0.7 : 1 }]} onPress={handleSave} disabled={saving}>
-                {saving ? <ActivityIndicator color="#fff" /> : <ThemedText style={{ color: "#fff", fontWeight: "700" }}>Guardar</ThemedText>}
+              <Pressable
+                style={[styles.saveBtn, { opacity: saving ? 0.7 : 1 }]}
+                onPress={handleSave}
+                disabled={saving}
+              >
+                {saving ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <ThemedText style={{ color: "#fff", fontWeight: "700" }}>
+                    Guardar
+                  </ThemedText>
+                )}
               </Pressable>
             </ScrollView>
           </View>
@@ -125,18 +328,82 @@ export default function AdminNews() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { flexDirection: "row", alignItems: "center", paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md, borderBottomWidth: 1, paddingTop: 56 },
-  backBtn: { marginRight: Spacing.md }, refreshBtn: { marginLeft: "auto" as never },
-  center: { flex: 1, justifyContent: "center", alignItems: "center", padding: Spacing["3xl"] },
-  searchRow: { flexDirection: "row", alignItems: "center", gap: Spacing.sm, margin: Spacing.md, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, borderRadius: BorderRadius.xs, borderWidth: 1 },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    borderBottomWidth: 1,
+    paddingTop: 56,
+  },
+  backBtn: { marginRight: Spacing.md },
+  refreshBtn: { marginLeft: "auto" as never },
+  center: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: Spacing["3xl"],
+  },
+  searchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+    margin: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.xs,
+    borderWidth: 1,
+  },
   card: { borderRadius: BorderRadius.md, borderWidth: 1, padding: Spacing.lg },
   cardRow: { flexDirection: "row", alignItems: "flex-start", gap: Spacing.sm },
-  catBadge: { alignSelf: "flex-start", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4, backgroundColor: BrandColors.primary + "15", marginTop: 2 },
+  catBadge: {
+    alignSelf: "flex-start",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+    backgroundColor: BrandColors.primary + "15",
+    marginTop: 2,
+  },
   iconBtn: { padding: 4 },
-  fab: { position: "absolute", bottom: 32, right: 24, width: 56, height: 56, borderRadius: 28, backgroundColor: BrandColors.primary, justifyContent: "center", alignItems: "center", elevation: 4 },
-  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
-  sheet: { maxHeight: "85%", borderTopLeftRadius: BorderRadius.lg, borderTopRightRadius: BorderRadius.lg },
-  sheetHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: Spacing.lg },
-  input: { borderWidth: 1, borderRadius: BorderRadius.xs, padding: Spacing.md, fontSize: 15 },
-  saveBtn: { backgroundColor: BrandColors.primary, padding: Spacing.lg, borderRadius: BorderRadius.sm, alignItems: "center", marginTop: Spacing.md },
+  fab: {
+    position: "absolute",
+    bottom: 32,
+    right: 24,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: BrandColors.primary,
+    justifyContent: "center",
+    alignItems: "center",
+    elevation: 4,
+  },
+  overlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "flex-end",
+  },
+  sheet: {
+    maxHeight: "85%",
+    borderTopLeftRadius: BorderRadius.lg,
+    borderTopRightRadius: BorderRadius.lg,
+  },
+  sheetHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: Spacing.lg,
+  },
+  input: {
+    borderWidth: 1,
+    borderRadius: BorderRadius.xs,
+    padding: Spacing.md,
+    fontSize: 15,
+  },
+  saveBtn: {
+    backgroundColor: BrandColors.primary,
+    padding: Spacing.lg,
+    borderRadius: BorderRadius.sm,
+    alignItems: "center",
+    marginTop: Spacing.md,
+  },
 });

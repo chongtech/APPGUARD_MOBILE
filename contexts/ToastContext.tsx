@@ -1,7 +1,18 @@
-import React, { createContext, useContext, useState, useCallback, useRef } from "react";
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  useRef,
+} from "react";
 import { Animated, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { StatusColors, Typography, BorderRadius, Spacing } from "@/constants/theme";
+import {
+  StatusColors,
+  Typography,
+  BorderRadius,
+  Spacing,
+} from "@/constants/theme";
 
 type ToastType = "success" | "error" | "warning" | "info";
 
@@ -35,10 +46,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     <ToastContext.Provider value={{ showToast }}>
       {children}
       <View
-        style={[
-          styles.container,
-          { bottom: insets.bottom + Spacing.lg },
-        ]}
+        style={[styles.container, { bottom: insets.bottom + Spacing.lg }]}
         pointerEvents="none"
       >
         {toasts.map((toast) => (
@@ -54,9 +62,17 @@ function ToastItem({ toast }: { toast: Toast }) {
 
   React.useEffect(() => {
     Animated.sequence([
-      Animated.timing(opacity, { toValue: 1, duration: 200, useNativeDriver: true }),
+      Animated.timing(opacity, {
+        toValue: 1,
+        duration: 200,
+        useNativeDriver: true,
+      }),
       Animated.delay(TOAST_DURATION - 400),
-      Animated.timing(opacity, { toValue: 0, duration: 200, useNativeDriver: true }),
+      Animated.timing(opacity, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: true,
+      }),
     ]).start();
   }, [opacity]);
 

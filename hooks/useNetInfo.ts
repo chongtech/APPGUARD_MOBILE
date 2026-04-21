@@ -6,11 +6,15 @@ export function useNetInfo() {
 
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener((state: NetInfoState) => {
-      setIsOnline(state.isConnected === true && state.isInternetReachable !== false);
+      setIsOnline(
+        state.isConnected === true && state.isInternetReachable !== false,
+      );
     });
 
     NetInfo.fetch().then((state: NetInfoState) => {
-      setIsOnline(state.isConnected === true && state.isInternetReachable !== false);
+      setIsOnline(
+        state.isConnected === true && state.isInternetReachable !== false,
+      );
     });
 
     return unsubscribe;

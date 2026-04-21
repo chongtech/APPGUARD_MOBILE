@@ -10,7 +10,7 @@ function createMissingSupabaseConfigError(target: string): Error {
   if (!supabaseAnonKey) missing.push("EXPO_PUBLIC_SUPABASE_ANON_KEY");
 
   return new Error(
-    `Supabase ${target} unavailable: missing ${missing.join(" and ")}. Configure Expo public env vars to use the real backend.`
+    `Supabase ${target} unavailable: missing ${missing.join(" and ")}. Configure Expo public env vars to use the real backend.`,
   );
 }
 
@@ -30,13 +30,17 @@ const mockSupabase = {
     delete: () => ({ error: null }),
   }),
   channel: (_name: string) => ({
-    on: (_event: string, _filter: unknown, _callback: unknown) => ({ subscribe: () => {} }),
+    on: (_event: string, _filter: unknown, _callback: unknown) => ({
+      subscribe: () => {},
+    }),
     subscribe: () => {},
   }),
   removeChannel: (_channel: unknown) => {},
 };
 
-let supabase: ReturnType<typeof import("@supabase/supabase-js").createClient> | typeof mockSupabase;
+let supabase:
+  | ReturnType<typeof import("@supabase/supabase-js").createClient>
+  | typeof mockSupabase;
 
 try {
   if (supabaseUrl && supabaseAnonKey) {
@@ -55,12 +59,18 @@ try {
       },
     });
   } else {
-    console.warn("⚠️  Supabase credentials not configured. Using mock client for development.");
-    supabase = mockSupabase as unknown as ReturnType<typeof import("@supabase/supabase-js").createClient>;
+    console.warn(
+      "⚠️  Supabase credentials not configured. Using mock client for development.",
+    );
+    supabase = mockSupabase as unknown as ReturnType<
+      typeof import("@supabase/supabase-js").createClient
+    >;
   }
 } catch (error) {
   console.warn("⚠️  Could not initialize Supabase. Using mock client:", error);
-  supabase = mockSupabase as unknown as ReturnType<typeof import("@supabase/supabase-js").createClient>;
+  supabase = mockSupabase as unknown as ReturnType<
+    typeof import("@supabase/supabase-js").createClient
+  >;
 }
 
 export { supabase };

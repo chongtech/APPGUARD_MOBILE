@@ -9,7 +9,10 @@ export type ErrorBoundaryProps = PropsWithChildren<{
 
 type ErrorBoundaryState = { error: Error | null };
 
-export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+export class ErrorBoundary extends Component<
+  ErrorBoundaryProps,
+  ErrorBoundaryState
+> {
   state: ErrorBoundaryState = { error: null };
 
   static defaultProps = { FallbackComponent: ErrorFallback };
@@ -22,7 +25,9 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     if (typeof this.props.onError === "function") {
       this.props.onError(error, info.componentStack);
     } else {
-      Sentry.captureException(error, { extra: { componentStack: info.componentStack } });
+      Sentry.captureException(error, {
+        extra: { componentStack: info.componentStack },
+      });
     }
   }
 
@@ -33,7 +38,10 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   render() {
     const { FallbackComponent } = this.props;
     return this.state.error && FallbackComponent ? (
-      <FallbackComponent error={this.state.error} resetError={this.resetError} />
+      <FallbackComponent
+        error={this.state.error}
+        resetError={this.resetError}
+      />
     ) : (
       this.props.children
     );
