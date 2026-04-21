@@ -94,6 +94,38 @@ function describeBindValue(value: SQLiteBindValue): string {
   return typeof value;
 }
 
+function toSQLiteLiteral(value: SQLiteBindValue): string {
+  if (value === null) return "NULL";
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? String(value) : "NULL";
+  }
+  if (typeof value === "boolean") return value ? "1" : "0";
+  if (value instanceof Uint8Array) {
+    return `X'${Array.from(value, (byte) =>
+      byte.toString(16).padStart(2, "0"),
+    ).join("")}'`;
+  }
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+function inlinePositionalBinds(sql: string, binds: Binds): string {
+  let index = 0;
+  const expanded = sql.replace(/\?/g, () => {
+    if (index >= binds.length) {
+      throw new Error("SQLite bind count mismatch: too few values");
+    }
+    const literal = toSQLiteLiteral(binds[index]);
+    index += 1;
+    return literal;
+  });
+
+  if (index !== binds.length) {
+    throw new Error("SQLite bind count mismatch: too many values");
+  }
+
+  return expanded;
+}
+
 async function runSql(
   db: SQLiteDb,
   sql: string,
@@ -103,7 +135,7 @@ async function runSql(
   const binds = normalizeBinds(params);
 
   try {
-    await db.runAsync(sql, binds);
+    await db.runAsync(inlinePositionalBinds(sql, binds));
   } catch (error) {
     logger.error(LogCategory.DATABASE, "SQLite runAsync failed", error, {
       table: context.table,
@@ -190,8 +222,9 @@ export class TableAdapter<T = AnyRow> {
   async get(id: string | number): Promise<T | undefined> {
     const db = await getDb();
     const row = await db.getFirstAsync<AnyRow>(
-      `SELECT * FROM ${this.table} WHERE id = ?`,
-      [toSQLiteBindValue(id)],
+      inlinePositionalBinds(`SELECT * FROM ${this.table} WHERE id = ?`, [
+        toSQLiteBindValue(id),
+      ]),
     );
     if (!row) return undefined;
     return deserializeRow(this.table, row) as unknown as T;
@@ -236,8 +269,9 @@ export class TableAdapter<T = AnyRow> {
         toArray: async (): Promise<T[]> => {
           const db = await getDb();
           const rows = await db.getAllAsync<AnyRow>(
-            `SELECT * FROM ${table} WHERE ${field} = ?`,
-            [toSQLiteBindValue(value)],
+            inlinePositionalBinds(`SELECT * FROM ${table} WHERE ${field} = ?`, [
+              toSQLiteBindValue(value),
+            ]),
           );
           return rows.map(
             (r: AnyRow) => deserializeRow(table, r) as unknown as T,
@@ -246,8 +280,10 @@ export class TableAdapter<T = AnyRow> {
         count: async (): Promise<number> => {
           const db = await getDb();
           const result = await db.getFirstAsync<{ count: number }>(
-            `SELECT COUNT(*) as count FROM ${table} WHERE ${field} = ?`,
-            [toSQLiteBindValue(value)],
+            inlinePositionalBinds(
+              `SELECT COUNT(*) as count FROM ${table} WHERE ${field} = ?`,
+              [toSQLiteBindValue(value)],
+            ),
           );
           return result?.count ?? 0;
         },
@@ -281,8 +317,9 @@ export class TableAdapter<T = AnyRow> {
         toArray: async (): Promise<T[]> => {
           const db = await getDb();
           const rows = await db.getAllAsync<AnyRow>(
-            `SELECT * FROM ${table} WHERE ${field} > ?`,
-            [toSQLiteBindValue(value)],
+            inlinePositionalBinds(`SELECT * FROM ${table} WHERE ${field} > ?`, [
+              toSQLiteBindValue(value),
+            ]),
           );
           return rows.map(
             (r: AnyRow) => deserializeRow(table, r) as unknown as T,
@@ -293,8 +330,10 @@ export class TableAdapter<T = AnyRow> {
         toArray: async (): Promise<T[]> => {
           const db = await getDb();
           const rows = await db.getAllAsync<AnyRow>(
-            `SELECT * FROM ${table} WHERE ${field} LIKE ?`,
-            [`${prefix}%`],
+            inlinePositionalBinds(
+              `SELECT * FROM ${table} WHERE ${field} LIKE ?`,
+              [`${prefix}%`],
+            ),
           );
           return rows.map(
             (r: AnyRow) => deserializeRow(table, r) as unknown as T,
@@ -306,7 +345,9 @@ export class TableAdapter<T = AnyRow> {
 
   async rawQuery(sql: string, params?: unknown[]): Promise<T[]> {
     const db = await getDb();
-    const rows = await db.getAllAsync<AnyRow>(sql, normalizeBinds(params));
+    const rows = await db.getAllAsync<AnyRow>(
+      inlinePositionalBinds(sql, normalizeBinds(params)),
+    );
     return rows.map(
       (r: AnyRow) => deserializeRow(this.table, r) as unknown as T,
     );

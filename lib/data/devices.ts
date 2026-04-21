@@ -81,6 +81,10 @@ export async function getAllActiveDevicesWithCondoInfo(): Promise<
     }));
 }
 
+export async function getAllDevices(): Promise<Device[]> {
+  return callRpc<Device[]>("admin_get_all_devices", {});
+}
+
 export async function deactivateCondoDevices(
   condominiumId: number,
 ): Promise<boolean> {
