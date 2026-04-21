@@ -6,6 +6,7 @@
  * JSON columns (action_history, metadata) are serialized/deserialized automatically.
  */
 import { getDb } from "@/database/db";
+import { logger, LogCategory } from "@/services/logger";
 import type { SQLiteBindValue } from "expo-sqlite";
 import type {
   Visit,
@@ -27,6 +28,7 @@ import type {
 
 type AnyRow = Record<string, unknown>;
 type Binds = SQLiteBindValue[];
+type SQLiteDb = Awaited<ReturnType<typeof getDb>>;
 
 const JSON_COLUMNS: Record<string, string[]> = {
   incidents: ["action_history"],
@@ -76,9 +78,41 @@ function toSQLiteBindValue(value: unknown): SQLiteBindValue {
   // SQLite has no boolean type — convert to INTEGER 0/1.
   if (typeof value === "boolean") return value ? 1 : 0;
   if (value instanceof Date) return value.toISOString();
+  if (typeof value === "bigint") return value.toString();
   // Any remaining object/array — stringify to prevent Kotlin bridge crash.
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
+}
+
+function normalizeBinds(params: readonly unknown[] = []): Binds {
+  return params.map(toSQLiteBindValue);
+}
+
+function describeBindValue(value: SQLiteBindValue): string {
+  if (value === null) return "null";
+  if (value instanceof Uint8Array) return `Uint8Array(${value.byteLength})`;
+  return typeof value;
+}
+
+async function runSql(
+  db: SQLiteDb,
+  sql: string,
+  params: readonly unknown[] = [],
+  context: { table: string; operation: string },
+): Promise<void> {
+  const binds = normalizeBinds(params);
+
+  try {
+    await db.runAsync(sql, binds);
+  } catch (error) {
+    logger.error(LogCategory.DATABASE, "SQLite runAsync failed", error, {
+      table: context.table,
+      operation: context.operation,
+      paramCount: binds.length,
+      bindTypes: binds.map(describeBindValue),
+    });
+    throw error;
+  }
 }
 
 /** Strip keys that don't exist as columns in the target table.
@@ -127,7 +161,7 @@ export class TableAdapter<T = AnyRow> {
     );
     const serialized = serializeRow(this.table, filtered);
     const { sql, params } = buildInsertOrReplace(this.table, serialized);
-    await db.runAsync(sql, params);
+    await runSql(db, sql, params, { table: this.table, operation: "put" });
   }
 
   async bulkPut(records: T[]): Promise<void> {
@@ -145,7 +179,10 @@ export class TableAdapter<T = AnyRow> {
     }
     await db.withTransactionAsync(async () => {
       for (const { sql, params } of statements) {
-        await db.runAsync(sql, params);
+        await runSql(db, sql, params, {
+          table: this.table,
+          operation: "bulkPut",
+        });
       }
     });
   }
@@ -178,14 +215,18 @@ export class TableAdapter<T = AnyRow> {
 
   async clear(): Promise<void> {
     const db = await getDb();
-    await db.runAsync(`DELETE FROM ${this.table}`);
+    await runSql(db, `DELETE FROM ${this.table}`, [], {
+      table: this.table,
+      operation: "clear",
+    });
   }
 
   async delete(id: string | number): Promise<void> {
     const db = await getDb();
-    await db.runAsync(`DELETE FROM ${this.table} WHERE id = ?`, [
-      toSQLiteBindValue(id),
-    ]);
+    await runSql(db, `DELETE FROM ${this.table} WHERE id = ?`, [id], {
+      table: this.table,
+      operation: "delete",
+    });
   }
 
   where(field: string) {
@@ -212,7 +253,8 @@ export class TableAdapter<T = AnyRow> {
         },
         modify: async (changes: Partial<T>): Promise<void> => {
           const db = await getDb();
-          const serialized = serializeRow(table, changes as AnyRow);
+          const filtered = await filterToTableColumns(table, changes as AnyRow);
+          const serialized = serializeRow(table, filtered);
           const keys = Object.keys(serialized);
           if (keys.length === 0) return;
           const setParts = keys.map((k) => `${k} = ?`).join(", ");
@@ -220,16 +262,19 @@ export class TableAdapter<T = AnyRow> {
             ...keys.map((k) => toSQLiteBindValue(serialized[k])),
             toSQLiteBindValue(value),
           ];
-          await db.runAsync(
+          await runSql(
+            db,
             `UPDATE ${table} SET ${setParts} WHERE ${field} = ?`,
             params,
+            { table, operation: "modify" },
           );
         },
         delete: async (): Promise<void> => {
           const db = await getDb();
-          await db.runAsync(`DELETE FROM ${table} WHERE ${field} = ?`, [
-            toSQLiteBindValue(value),
-          ]);
+          await runSql(db, `DELETE FROM ${table} WHERE ${field} = ?`, [value], {
+            table,
+            operation: "where.delete",
+          });
         },
       }),
       above: (value: unknown) => ({
@@ -261,7 +306,7 @@ export class TableAdapter<T = AnyRow> {
 
   async rawQuery(sql: string, params?: unknown[]): Promise<T[]> {
     const db = await getDb();
-    const rows = await db.getAllAsync<AnyRow>(sql, (params ?? []) as Binds);
+    const rows = await db.getAllAsync<AnyRow>(sql, normalizeBinds(params));
     return rows.map(
       (r: AnyRow) => deserializeRow(this.table, r) as unknown as T,
     );
