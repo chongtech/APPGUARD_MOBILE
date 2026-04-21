@@ -28,6 +28,7 @@ import {
   getDeviceByIdentifier,
   getActiveDevicesByCondominium,
   getAllActiveDevicesWithCondoInfo,
+  getAllDevices,
   deactivateCondoDevices,
   type RecoveryDevice,
 } from "@/lib/data/devices";
@@ -400,7 +401,7 @@ class DataService {
   private async fetchAvailableCondominiums(): Promise<Condominium[]> {
     const [allCondos, allDevices] = await Promise.all([
       getCondominiumList(),
-      getAllActiveDevicesWithCondoInfo(),
+      getAllDevices(),
     ]);
 
     const assignedCondoIds = new Set(

@@ -32,9 +32,7 @@ import type { Resident, ResidentQrCode } from "@/types";
 type Nav = NativeStackNavigationProp<AdminStackParamList>;
 type AppFilter = "ALL" | "WITH_APP" | "WITHOUT_APP";
 
-function parseCSV(
-  text: string,
-): {
+function parseCSV(text: string): {
   name: string;
   email?: string;
   phone?: string;
