@@ -2,7 +2,9 @@ const fs = require("fs");
 const path = require("path");
 
 const ROOT = process.cwd();
-const SQL_PATH = path.join(ROOT, "database", "migrations", "all_rpcs.sql");
+const SQL_PATH = path.join(ROOT, "database", "migrations", "all.sql");
+const CANONICAL_RPC_START = "-- BEGIN CANONICAL RPC CATALOG";
+const CANONICAL_RPC_END = "-- END CANONICAL RPC CATALOG";
 const ALLOWED_RPC_FILE = path.normalize(path.join("lib", "data", "rpc.ts"));
 const SCAN_DIRS = [
   "components",
@@ -97,7 +99,13 @@ function parseSqlArgs(argList) {
 }
 
 function parseSqlCatalog() {
-  const sql = readFile(SQL_PATH);
+  const sqlFile = readFile(SQL_PATH);
+  const startIndex = sqlFile.indexOf(CANONICAL_RPC_START);
+  const endIndex = sqlFile.indexOf(CANONICAL_RPC_END);
+  const sql =
+    startIndex !== -1 && endIndex !== -1 && endIndex > startIndex
+      ? sqlFile.slice(startIndex + CANONICAL_RPC_START.length, endIndex)
+      : sqlFile;
   const lines = sql.split(/\r?\n/);
   const functions = new Map();
 
@@ -359,7 +367,7 @@ function main() {
   for (const [name, signatures] of catalog.entries()) {
     if (signatures.length > 1) {
       const lines = signatures.map((signature) => signature.line).join(", ");
-      errors.push(`Overloaded RPC in all_rpcs.sql: ${name} (lines ${lines})`);
+      errors.push(`Overloaded RPC in all.sql: ${name} (lines ${lines})`);
     }
   }
 

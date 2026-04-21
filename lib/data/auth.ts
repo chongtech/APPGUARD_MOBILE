@@ -5,7 +5,7 @@ export interface StaffLoginResult {
   id: number;
   first_name: string;
   last_name: string;
-  condominium_id: number;
+  condominium_id: number | null;
   role: Staff["role"];
   condominium?: Condominium;
 }

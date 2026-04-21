@@ -140,7 +140,7 @@ APPGUARD_MOBILE/
 │   ├── db.ts                   SQLite init + migration runner (PRAGMA user_version)
 │   ├── schema.ts               Table definitions & indexes
 │   ├── adapter.ts              Dexie-like compatibility adapter
-│   └── migrations/             SQL migration files (numbered)
+│   └── migrations/             Single consolidated Supabase SQL catalog (`all.sql`)
 │
 ├── hooks/                      Shared React hooks (useTheme, useColorScheme, useScreenInsets, useNetInfo)
 │
@@ -179,7 +179,7 @@ npm run web                        # Run web build
 
 # Linting & Formatting
 npm run lint                       # ESLint check (main verification command — no test suite)
-npm run check:rpcs                 # Verify app RPC calls against all_rpcs.sql
+npm run check:rpcs                 # Verify app RPC calls against the canonical RPC catalog in all.sql
 npm run check:format               # Check Prettier formatting
 npm run format                     # Apply Prettier formatting
 
@@ -228,7 +228,7 @@ showToast('Visita registada com sucesso', 'success');
 
 ### Adding a Database Migration
 
-1. Create a new SQL file in `database/migrations/` (e.g., `015_add_column.sql`)
+1. Update the single consolidated SQL file in `database/migrations/all.sql`
 2. Increment the version in `database/db.ts` migration runner
 3. If offline storage is impacted, update `database/schema.ts`
 4. Update shared types in `types.ts`
@@ -238,7 +238,7 @@ showToast('Visita registada com sucesso', 'success');
 ### Backend Schema / RPC Changes
 
 If a backend schema or RPC changes, update all affected layers together:
-- SQL migration under `database/migrations/`
+- SQL migration in `database/migrations/all.sql`
 - Local SQLite schema in `database/schema.ts` (if offline storage is impacted)
 - Shared types in `types.ts`
 - Service wrappers in `lib/data/*` or `services/dataService.ts`

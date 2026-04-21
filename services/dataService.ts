@@ -25,6 +25,11 @@ import {
   registerDevice,
   updateDeviceHeartbeat,
   setCondoVisitorPhotoSetting,
+  getDeviceByIdentifier,
+  getActiveDevicesByCondominium,
+  getAllActiveDevicesWithCondoInfo,
+  deactivateCondoDevices,
+  type RecoveryDevice,
 } from "@/lib/data/devices";
 import {
   getDeviceIdentifier,
@@ -57,10 +62,17 @@ import type {
   CondominiumSubscription,
 } from "@/types";
 import {
+  UserRole,
   SyncStatus as SyncStatusEnum,
   VisitStatus as VisitStatusEnum,
 } from "@/types";
 import bcrypt from "bcryptjs";
+
+type DeviceSetupResult = {
+  success: boolean;
+  error?: string;
+  existingDevices?: Device[];
+};
 
 // ─── Storage Keys ─────────────────────────────────────────────────────────────
 const KEYS = {
@@ -181,14 +193,184 @@ class DataService {
     logger.trackHealthScore(this.backendHealthScore);
   }
 
+  private isActiveDeviceStatus(
+    status?: Device["status"] | string | null,
+  ): boolean {
+    return (status ?? "").toUpperCase() === "ACTIVE";
+  }
+
+  private isAdminRole(role: UserRole): boolean {
+    return role === UserRole.ADMIN || role === UserRole.SUPER_ADMIN;
+  }
+
+  private splitAdminName(fullName: string): {
+    firstName: string;
+    lastName: string;
+  } {
+    const trimmed = fullName.trim().replace(/\s+/g, " ");
+    const [firstName = "", ...rest] = trimmed.split(" ");
+    return {
+      firstName,
+      lastName: rest.join(" "),
+    };
+  }
+
+  private async getCachedConfiguredCondo(): Promise<Condominium | null> {
+    if (this.currentCondoId) {
+      const local = await db.condominiums.get(this.currentCondoId);
+      if (local) return local;
+    }
+
+    const condoIdStr = await AsyncStorage.getItem(KEYS.CONDO_ID);
+    if (!condoIdStr) return null;
+
+    const parsedId = parseInt(condoIdStr, 10);
+    if (Number.isNaN(parsedId)) return null;
+
+    this.currentCondoId = parsedId;
+    return (await db.condominiums.get(parsedId)) ?? null;
+  }
+
+  private async persistConfiguredDeviceState(params: {
+    condominium: Condominium;
+    deviceIdentifier: string;
+    device?: Device | null;
+  }): Promise<void> {
+    const deviceRecord: Device = {
+      ...(params.device ?? {}),
+      id: params.device?.id ?? params.deviceIdentifier,
+      device_identifier: params.deviceIdentifier,
+      device_name:
+        params.device?.device_name ?? `Tablet - ${params.condominium.name}`,
+      condominium_id: params.condominium.id,
+      status: params.device?.status ?? "ACTIVE",
+    };
+
+    await Promise.all([
+      AsyncStorage.setItem(KEYS.CONDO_ID, String(params.condominium.id)),
+      AsyncStorage.setItem(KEYS.DEVICE_ID, params.deviceIdentifier),
+      db.condominiums.put(params.condominium),
+      db.devices.put(deviceRecord),
+    ]);
+
+    this.currentCondoId = params.condominium.id;
+    this.currentDeviceId = params.deviceIdentifier;
+  }
+
+  private async clearLocalAppData(): Promise<void> {
+    await Promise.all([
+      AsyncStorage.multiRemove([
+        KEYS.CONDO_ID,
+        KEYS.DEVICE_ID,
+        KEYS.SESSION_STAFF_ID,
+        KEYS.HEALTH_SCORE,
+        KEYS.LAST_SYNC,
+      ]),
+      db.visits.clear(),
+      db.visitEvents.clear(),
+      db.units.clear(),
+      db.visitTypes.clear(),
+      db.serviceTypes.clear(),
+      db.settings.clear(),
+      db.staff.clear(),
+      db.condominiums.clear(),
+      db.restaurants.clear(),
+      db.sports.clear(),
+      db.incidents.clear(),
+      db.incidentTypes.clear(),
+      db.incidentStatuses.clear(),
+      db.devices.clear(),
+      db.residents.clear(),
+      db.news.clear(),
+    ]);
+
+    this.currentCondoId = null;
+    this.currentDeviceId = null;
+  }
+
   // ─── Device & Setup ────────────────────────────────────────────────────────
 
   async isDeviceConfigured(): Promise<boolean> {
-    const condoId = await AsyncStorage.getItem(KEYS.CONDO_ID);
-    return condoId !== null;
+    const deviceIdentifier = await getDeviceIdentifier();
+
+    if (this.isBackendHealthy) {
+      try {
+        const device = await getDeviceByIdentifier(deviceIdentifier);
+
+        if (!device) {
+          await this.clearLocalAppData();
+          logger.warn(
+            LogCategory.AUTH,
+            "Device not found in backend; clearing local setup state",
+            { deviceIdentifier },
+          );
+          return false;
+        }
+
+        if (!this.isActiveDeviceStatus(device.status)) {
+          await this.clearLocalAppData();
+          logger.warn(
+            LogCategory.AUTH,
+            "Device is not active in backend; clearing local setup state",
+            {
+              deviceIdentifier,
+              status: device.status,
+            },
+          );
+          return false;
+        }
+
+        if (!device.condominium_id) {
+          await this.clearLocalAppData();
+          logger.warn(
+            LogCategory.AUTH,
+            "Active device has no condominium assignment",
+            { deviceIdentifier },
+          );
+          return false;
+        }
+
+        const condominium = await getCondominiumById(device.condominium_id);
+        if (!condominium) {
+          await this.clearLocalAppData();
+          logger.warn(
+            LogCategory.AUTH,
+            "Configured device condominium not found in backend",
+            {
+              deviceIdentifier,
+              condominiumId: device.condominium_id,
+            },
+          );
+          return false;
+        }
+
+        await this.persistConfiguredDeviceState({
+          condominium,
+          deviceIdentifier,
+          device,
+        });
+        return true;
+      } catch (error) {
+        logger.error(
+          LogCategory.AUTH,
+          "isDeviceConfigured: backend validation failed, trying local cache",
+          error,
+          { deviceIdentifier },
+        );
+      }
+    }
+
+    const localCondominium = await this.getCachedConfiguredCondo();
+    if (!localCondominium) return false;
+
+    await this.persistConfiguredDeviceState({
+      condominium: localCondominium,
+      deviceIdentifier,
+    });
+    return true;
   }
 
-  async getCondominiums(): Promise<Condominium[]> {
+  async getAvailableCondominiums(): Promise<Condominium[]> {
     const local = await db.condominiums.toArray();
     if (local.length > 0) {
       if (this.isBackendHealthy) {
@@ -197,22 +379,46 @@ class DataService {
       return local;
     }
     if (this.isBackendHealthy) {
-      const remote = await getCondominiumList();
+      const remote = await this.fetchAvailableCondominiums();
       await db.condominiums.bulkPut(remote);
       return remote;
     }
     logger.error(
       LogCategory.SYNC,
-      "getCondominiums: offline with no cached data",
+      "getAvailableCondominiums: offline with no cached data",
       undefined,
       { isOnline: this.isOnline, healthScore: this.backendHealthScore },
     );
     return [];
   }
 
+  async getCondominiums(): Promise<Condominium[]> {
+    return this.getAvailableCondominiums();
+  }
+
+  private async fetchAvailableCondominiums(): Promise<Condominium[]> {
+    const [allCondos, allDevices] = await Promise.all([
+      getCondominiumList(),
+      getAllActiveDevicesWithCondoInfo(),
+    ]);
+
+    const assignedCondoIds = new Set(
+      allDevices
+        .filter((device) => this.isActiveDeviceStatus(device.status))
+        .map((device) => device.condominium_id)
+        .filter((value): value is number => typeof value === "number"),
+    );
+
+    return allCondos.filter(
+      (condominium) =>
+        condominium.status === "ACTIVE" &&
+        !assignedCondoIds.has(condominium.id),
+    );
+  }
+
   private async refreshCondominiums(): Promise<void> {
     try {
-      const remote = await getCondominiumList();
+      const remote = await this.fetchAvailableCondominiums();
       await db.condominiums.bulkPut(remote);
     } catch (error) {
       logger.error(LogCategory.SYNC, "refreshCondominiums failed", error);
@@ -223,60 +429,265 @@ class DataService {
   async configureDevice(
     condominiumId: number,
     visitorPhotoEnabled: boolean = true,
-  ): Promise<Device> {
+  ): Promise<DeviceSetupResult> {
+    if (!this.isBackendHealthy) {
+      return {
+        success: false,
+        error: "Sem conexão com o servidor. Use a configuração manual offline.",
+      };
+    }
+
+    const condominium = await getCondominiumById(condominiumId);
+    if (!condominium) {
+      return { success: false, error: "Condomínio não encontrado." };
+    }
+
     const identifier = await getDeviceIdentifier();
+    const existingDevices = await getActiveDevicesByCondominium(
+      condominiumId,
+      identifier,
+    );
+
+    if (existingDevices.length > 0) {
+      return {
+        success: false,
+        error: "Este condomínio já está associado a outro dispositivo ativo.",
+        existingDevices,
+      };
+    }
+
     const metadata = getDeviceMetadata() as unknown as Record<string, unknown>;
     const name = getDeviceName();
 
-    const device = await registerDevice({
-      deviceIdentifier: identifier,
-      deviceName: name,
-      condominiumId,
-      metadata,
-    });
-
-    // Save visitor photo setting to Supabase
     try {
-      await setCondoVisitorPhotoSetting(condominiumId, visitorPhotoEnabled);
-    } catch (err) {
-      logger.warn(
-        LogCategory.AUTH,
-        "Failed to save visitor photo setting to Supabase",
-        err,
-      );
-    }
-
-    await AsyncStorage.setItem(KEYS.CONDO_ID, String(condominiumId));
-    await AsyncStorage.setItem(KEYS.DEVICE_ID, device.id ?? identifier);
-
-    this.currentCondoId = condominiumId;
-    this.currentDeviceId = device.id ?? identifier;
-
-    // Persist in local DB too
-    await db.devices.put(device);
-
-    // Update local condominium record with visitor photo setting
-    const condo = await db.condominiums.get(condominiumId);
-    if (condo) {
-      await db.condominiums.put({
-        ...condo,
-        visitor_photo_enabled: visitorPhotoEnabled,
+      const device = await registerDevice({
+        deviceIdentifier: identifier,
+        deviceName: name,
+        condominiumId,
+        metadata,
       });
+
+      await setCondoVisitorPhotoSetting(condominiumId, visitorPhotoEnabled);
+
+      const configuredCondominium: Condominium = {
+        ...condominium,
+        visitor_photo_enabled: visitorPhotoEnabled,
+      };
+
+      await this.persistConfiguredDeviceState({
+        condominium: configuredCondominium,
+        deviceIdentifier: identifier,
+        device,
+      });
+
+      logger.info(LogCategory.AUTH, "Device configured", {
+        condominiumId,
+        deviceId: identifier,
+        visitorPhotoEnabled,
+      });
+      return { success: true };
+    } catch (error) {
+      logger.error(LogCategory.AUTH, "configureDevice failed", error, {
+        condominiumId,
+        deviceIdentifier: identifier,
+      });
+      return {
+        success: false,
+        error: "Não foi possível configurar o dispositivo. Tente novamente.",
+      };
+    }
+  }
+
+  async forceConfigureDevice(
+    condominiumId: number,
+    adminName: string,
+    adminPin: string,
+    visitorPhotoEnabled: boolean = true,
+  ): Promise<DeviceSetupResult> {
+    if (!this.isBackendHealthy) {
+      return { success: false, error: "Sem conexão com o servidor." };
     }
 
-    logger.info(LogCategory.AUTH, "Device configured", {
-      condominiumId,
-      deviceId: device.id,
-      visitorPhotoEnabled,
-    });
-    return device;
+    const { firstName, lastName } = this.splitAdminName(adminName);
+    if (!firstName || !lastName || !adminPin.trim()) {
+      return {
+        success: false,
+        error: "Preencha o nome completo e o PIN do administrador.",
+      };
+    }
+
+    const adminAuth = await verifyStaffLogin(firstName, lastName, adminPin);
+    if (!adminAuth) {
+      return { success: false, error: "Credenciais inválidas." };
+    }
+
+    if (!this.isAdminRole(adminAuth.role)) {
+      return {
+        success: false,
+        error: "Apenas administradores podem substituir dispositivos.",
+      };
+    }
+
+    const deactivated = await deactivateCondoDevices(condominiumId);
+    if (!deactivated) {
+      return {
+        success: false,
+        error: "Falha ao desativar dispositivos antigos.",
+      };
+    }
+
+    return this.configureDevice(condominiumId, visitorPhotoEnabled);
+  }
+
+  async configureDeviceOffline(
+    condominiumId: number,
+    condominiumName: string,
+    visitorPhotoEnabled: boolean = true,
+  ): Promise<DeviceSetupResult> {
+    try {
+      const identifier = await getDeviceIdentifier();
+      const offlineCondominium: Condominium = {
+        id: condominiumId,
+        name: condominiumName.trim(),
+        status: "ACTIVE",
+        visitor_photo_enabled: visitorPhotoEnabled,
+        created_at: new Date().toISOString(),
+      };
+
+      const offlineDevice: Device = {
+        id: identifier,
+        device_identifier: identifier,
+        device_name: `${getDeviceName()} (Offline Setup)`,
+        condominium_id: condominiumId,
+        configured_at: new Date().toISOString(),
+        last_seen_at: new Date().toISOString(),
+        status: "ACTIVE",
+        metadata: getDeviceMetadata() as unknown as Record<string, unknown>,
+      };
+
+      await this.persistConfiguredDeviceState({
+        condominium: offlineCondominium,
+        deviceIdentifier: identifier,
+        device: offlineDevice,
+      });
+
+      logger.warn(LogCategory.AUTH, "Offline device configuration saved", {
+        condominiumId,
+        deviceIdentifier: identifier,
+      });
+      return { success: true };
+    } catch (error) {
+      logger.error(LogCategory.AUTH, "configureDeviceOffline failed", error, {
+        condominiumId,
+      });
+      return {
+        success: false,
+        error: "Falha ao configurar dispositivo offline.",
+      };
+    }
+  }
+
+  async recoverDeviceConfiguration(
+    deviceIdentifier: string,
+    adminName: string,
+    adminPin: string,
+  ): Promise<DeviceSetupResult> {
+    if (!this.isBackendHealthy) {
+      return {
+        success: false,
+        error: "Sem conexão com o servidor. Recuperação requer internet.",
+      };
+    }
+
+    const { firstName, lastName } = this.splitAdminName(adminName);
+    if (!firstName || !lastName || !adminPin.trim()) {
+      return {
+        success: false,
+        error: "Preencha o nome completo e o PIN do administrador.",
+      };
+    }
+
+    const adminAuth = await verifyStaffLogin(firstName, lastName, adminPin);
+    if (!adminAuth) {
+      return {
+        success: false,
+        error: "Credenciais de administrador inválidas.",
+      };
+    }
+
+    if (!this.isAdminRole(adminAuth.role)) {
+      return {
+        success: false,
+        error: "Apenas administradores podem recuperar dispositivos.",
+      };
+    }
+
+    try {
+      const device = await getDeviceByIdentifier(deviceIdentifier);
+      if (!device) {
+        return {
+          success: false,
+          error: "Dispositivo não encontrado no banco central.",
+        };
+      }
+
+      if (!this.isActiveDeviceStatus(device.status)) {
+        return {
+          success: false,
+          error: "Apenas dispositivos ativos podem ser recuperados.",
+        };
+      }
+
+      if (!device.condominium_id) {
+        return {
+          success: false,
+          error: "Dispositivo não está associado a nenhum condomínio.",
+        };
+      }
+
+      const condominium = await getCondominiumById(device.condominium_id);
+      if (!condominium) {
+        return {
+          success: false,
+          error: "Condomínio associado não encontrado.",
+        };
+      }
+
+      await this.persistConfiguredDeviceState({
+        condominium,
+        deviceIdentifier,
+        device,
+      });
+
+      logger.info(LogCategory.AUTH, "Device configuration recovered", {
+        deviceIdentifier,
+        condominiumId: condominium.id,
+      });
+      return { success: true };
+    } catch (error) {
+      logger.error(
+        LogCategory.AUTH,
+        "recoverDeviceConfiguration failed",
+        error,
+        { deviceIdentifier },
+      );
+      return {
+        success: false,
+        error: "Falha ao recuperar configuração do dispositivo.",
+      };
+    }
+  }
+
+  async getAllActiveDevicesForRecovery(): Promise<RecoveryDevice[]> {
+    if (!this.isBackendHealthy) return [];
+    return getAllActiveDevicesWithCondoInfo();
   }
 
   async getDeviceCondoDetails(): Promise<Condominium | null> {
-    if (!this.currentCondoId) return null;
-    const local = await db.condominiums.get(this.currentCondoId);
+    const local = await this.getCachedConfiguredCondo();
     if (local) return local;
-    if (this.isBackendHealthy) {
+
+    if (this.isBackendHealthy && this.currentCondoId) {
       const remote = await getCondominiumById(this.currentCondoId);
       if (remote) await db.condominiums.put(remote);
       return remote;
@@ -290,13 +701,7 @@ class DataService {
   }
 
   async resetDevice(): Promise<void> {
-    await Promise.all([
-      AsyncStorage.removeItem(KEYS.CONDO_ID),
-      AsyncStorage.removeItem(KEYS.DEVICE_ID),
-      AsyncStorage.removeItem(KEYS.SESSION_STAFF_ID),
-    ]);
-    this.currentCondoId = null;
-    this.currentDeviceId = null;
+    await this.clearLocalAppData();
   }
 
   // ─── Authentication ────────────────────────────────────────────────────────
@@ -334,11 +739,28 @@ class DataService {
           return null;
         }
 
+        const localCondominiumId =
+          result.condominium_id ??
+          (result.role === "SUPER_ADMIN" ? this.currentCondoId : null);
+        if (localCondominiumId == null) {
+          logger.warn(
+            LogCategory.AUTH,
+            "verify_staff_login returned staff without a condominium_id",
+            {
+              staffId: result.id,
+              role: result.role,
+            },
+          );
+          return null;
+        }
+
         // Preserve any previously cached hash so offline login keeps working.
         const cachedStaff = await db.staff.get(result.id);
-        const staff: Staff = cachedStaff?.pin_hash
-          ? { ...result, pin_hash: cachedStaff.pin_hash }
-          : result;
+        const staff: Staff = {
+          ...result,
+          condominium_id: localCondominiumId,
+          ...(cachedStaff?.pin_hash ? { pin_hash: cachedStaff.pin_hash } : {}),
+        };
         await db.staff.put(staff);
         await AsyncStorage.setItem(KEYS.SESSION_STAFF_ID, String(result.id));
 
@@ -625,7 +1047,7 @@ class DataService {
       const remote = await callRpc<VisitTypeConfig[]>("get_visit_types", {});
       if (remote?.length) await db.visitTypes.bulkPut(remote);
       return remote ?? [];
-    } catch (error) {
+    } catch {
       this.backendHealthScore--;
       return [];
     }
@@ -649,7 +1071,7 @@ class DataService {
       );
       if (remote?.length) await db.serviceTypes.bulkPut(remote);
       return remote ?? [];
-    } catch (error) {
+    } catch {
       this.backendHealthScore--;
       return [];
     }
@@ -676,7 +1098,7 @@ class DataService {
       });
       if (remote?.length) await db.restaurants.bulkPut(remote);
       return remote ?? [];
-    } catch (error) {
+    } catch {
       this.backendHealthScore--;
       return [];
     }
@@ -702,7 +1124,7 @@ class DataService {
       });
       if (remote?.length) await db.sports.bulkPut(remote);
       return remote ?? [];
-    } catch (error) {
+    } catch {
       this.backendHealthScore--;
       return [];
     }
@@ -728,7 +1150,7 @@ class DataService {
       });
       if (remote?.length) await db.units.bulkPut(remote);
       return remote ?? [];
-    } catch (error) {
+    } catch {
       this.backendHealthScore--;
       return [];
     }
@@ -754,7 +1176,7 @@ class DataService {
       });
       if (remote?.length) await db.residents.bulkPut(remote);
       return remote ?? [];
-    } catch (error) {
+    } catch {
       this.backendHealthScore--;
       return [];
     }
@@ -781,7 +1203,7 @@ class DataService {
       });
       if (remote?.length) await db.news.bulkPut(remote);
       return remote ?? [];
-    } catch (error) {
+    } catch {
       this.backendHealthScore--;
       return [];
     }
@@ -900,7 +1322,7 @@ class DataService {
       }
       return remote;
     } catch (error) {
-      logger.warn(LogCategory.SYNC, "getResidentById failed", error);
+      logger.error(LogCategory.SYNC, "getResidentById failed", error);
       return (await db.residents.get(residentId)) ?? null;
     }
   }
@@ -994,7 +1416,6 @@ class DataService {
     select = "*",
     filters?: Record<string, unknown>,
   ): Promise<T[]> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let q = (supabase as any).from(table).select(select);
     if (filters) {
       for (const [k, v] of Object.entries(filters)) {
@@ -1026,12 +1447,12 @@ class DataService {
         this.sbFrom<Staff>("staff"),
         this.sbFrom<Unit>("units"),
         this.sbFrom<Resident>("residents"),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
         (supabase as any)
           .from("visits")
           .select("id,status,check_in_at")
           .gte("check_in_at", today),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
         (supabase as any)
           .from("incidents")
           .select("id,status")
@@ -1066,7 +1487,6 @@ class DataService {
   async adminCreateCondominium(
     condo: Partial<Condominium>,
   ): Promise<Condominium> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (supabase as any)
       .from("condominiums")
       .insert(condo)
@@ -1080,7 +1500,6 @@ class DataService {
     id: number,
     updates: Partial<Condominium>,
   ): Promise<Condominium> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (supabase as any)
       .from("condominiums")
       .update(updates)
@@ -1100,7 +1519,6 @@ class DataService {
   }
 
   async adminCreateStaff(staff: Partial<Staff>): Promise<Staff> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (supabase as any)
       .from("staff")
       .insert(staff)
@@ -1111,7 +1529,6 @@ class DataService {
   }
 
   async adminUpdateStaff(id: number, updates: Partial<Staff>): Promise<Staff> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (supabase as any)
       .from("staff")
       .update(updates)
@@ -1123,7 +1540,6 @@ class DataService {
   }
 
   async adminDeleteStaff(id: number): Promise<void> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { error } = await (supabase as any)
       .from("staff")
       .delete()
@@ -1140,7 +1556,6 @@ class DataService {
   }
 
   async adminCreateUnit(unit: Partial<Unit>): Promise<Unit> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (supabase as any)
       .from("units")
       .insert(unit)
@@ -1151,7 +1566,6 @@ class DataService {
   }
 
   async adminUpdateUnit(id: number, updates: Partial<Unit>): Promise<Unit> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (supabase as any)
       .from("units")
       .update(updates)
@@ -1163,7 +1577,6 @@ class DataService {
   }
 
   async adminDeleteUnit(id: number): Promise<void> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { error } = await (supabase as any)
       .from("units")
       .delete()
@@ -1180,7 +1593,6 @@ class DataService {
   }
 
   async adminCreateResident(resident: Partial<Resident>): Promise<Resident> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (supabase as any)
       .from("residents")
       .insert(resident)
@@ -1194,7 +1606,6 @@ class DataService {
     id: number,
     updates: Partial<Resident>,
   ): Promise<Resident> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (supabase as any)
       .from("residents")
       .update(updates)
@@ -1206,7 +1617,6 @@ class DataService {
   }
 
   async adminDeleteResident(id: number): Promise<void> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { error } = await (supabase as any)
       .from("residents")
       .delete()
@@ -1218,7 +1628,6 @@ class DataService {
     condominiumId?: number,
     startDate?: string,
   ): Promise<Visit[]> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let q = (supabase as any)
       .from("visits")
       .select("*")
@@ -1232,7 +1641,6 @@ class DataService {
   }
 
   async adminUpdateVisitStatus(id: number, status: VisitStatus): Promise<void> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { error } = await (supabase as any)
       .from("visits")
       .update({ status })
@@ -1249,7 +1657,6 @@ class DataService {
   }
 
   async adminResolveIncident(id: string, notes: string): Promise<void> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { error } = await (supabase as any)
       .from("incidents")
       .update({
@@ -1270,7 +1677,6 @@ class DataService {
   }
 
   async adminDecommissionDevice(id: string): Promise<void> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { error } = await (supabase as any)
       .from("devices")
       .update({ status: "decommissioned" })
@@ -1285,7 +1691,6 @@ class DataService {
   async adminCreateVisitType(
     vt: Partial<VisitTypeConfig>,
   ): Promise<VisitTypeConfig> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (supabase as any)
       .from("visit_types")
       .insert(vt)
@@ -1299,7 +1704,6 @@ class DataService {
     id: number,
     updates: Partial<VisitTypeConfig>,
   ): Promise<VisitTypeConfig> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (supabase as any)
       .from("visit_types")
       .update(updates)
@@ -1311,7 +1715,6 @@ class DataService {
   }
 
   async adminDeleteVisitType(id: number): Promise<void> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { error } = await (supabase as any)
       .from("visit_types")
       .delete()
@@ -1326,7 +1729,6 @@ class DataService {
   async adminCreateServiceType(
     st: Partial<ServiceTypeConfig>,
   ): Promise<ServiceTypeConfig> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (supabase as any)
       .from("service_types")
       .insert(st)
@@ -1340,7 +1742,6 @@ class DataService {
     id: number,
     updates: Partial<ServiceTypeConfig>,
   ): Promise<ServiceTypeConfig> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (supabase as any)
       .from("service_types")
       .update(updates)
@@ -1352,7 +1753,6 @@ class DataService {
   }
 
   async adminDeleteServiceType(id: number): Promise<void> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { error } = await (supabase as any)
       .from("service_types")
       .delete()
@@ -1369,7 +1769,6 @@ class DataService {
   }
 
   async adminCreateRestaurant(r: Partial<Restaurant>): Promise<Restaurant> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (supabase as any)
       .from("restaurants")
       .insert(r)
@@ -1383,7 +1782,6 @@ class DataService {
     id: string,
     updates: Partial<Restaurant>,
   ): Promise<Restaurant> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (supabase as any)
       .from("restaurants")
       .update(updates)
@@ -1395,7 +1793,6 @@ class DataService {
   }
 
   async adminDeleteRestaurant(id: string): Promise<void> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { error } = await (supabase as any)
       .from("restaurants")
       .delete()
@@ -1412,7 +1809,6 @@ class DataService {
   }
 
   async adminCreateSport(s: Partial<Sport>): Promise<Sport> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (supabase as any)
       .from("sports")
       .insert(s)
@@ -1423,7 +1819,6 @@ class DataService {
   }
 
   async adminUpdateSport(id: string, updates: Partial<Sport>): Promise<Sport> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (supabase as any)
       .from("sports")
       .update(updates)
@@ -1435,7 +1830,6 @@ class DataService {
   }
 
   async adminDeleteSport(id: string): Promise<void> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { error } = await (supabase as any)
       .from("sports")
       .delete()
@@ -1454,7 +1848,6 @@ class DataService {
   async adminCreateNews(
     news: Partial<CondominiumNews>,
   ): Promise<CondominiumNews> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (supabase as any)
       .from("condominium_news")
       .insert(news)
@@ -1468,7 +1861,6 @@ class DataService {
     id: number,
     updates: Partial<CondominiumNews>,
   ): Promise<CondominiumNews> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (supabase as any)
       .from("condominium_news")
       .update(updates)
@@ -1480,7 +1872,6 @@ class DataService {
   }
 
   async adminDeleteNews(id: number): Promise<void> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { error } = await (supabase as any)
       .from("condominium_news")
       .delete()
@@ -1492,7 +1883,6 @@ class DataService {
     condominiumId?: number;
     limit?: number;
   }): Promise<AuditLog[]> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let q = (supabase as any)
       .from("audit_logs")
       .select("*")
@@ -1508,7 +1898,6 @@ class DataService {
   async adminGetDeviceRegistrationErrors(
     condominiumId?: number,
   ): Promise<DeviceRegistrationError[]> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let q = (supabase as any)
       .from("device_registration_errors")
       .select("*")
@@ -1521,7 +1910,6 @@ class DataService {
   }
 
   async adminGetCondominiumSubscriptions(): Promise<CondominiumSubscription[]> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (supabase as any)
       .from("condominium_subscriptions")
       .select("*, condominiums(name)")
@@ -1536,7 +1924,6 @@ class DataService {
     id: number,
     status: string,
   ): Promise<void> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { error } = await (supabase as any)
       .from("condominium_subscriptions")
       .update({ status })

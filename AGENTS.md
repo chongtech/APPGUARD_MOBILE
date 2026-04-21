@@ -149,7 +149,7 @@ APPGUARD_MOBILE/
 |  |- db.ts                    SQLite init + migration runner (PRAGMA user_version)
 |  |- schema.ts                Table definitions & indexes
 |  |- adapter.ts               Dexie-like compatibility adapter
-|  '- migrations/              SQL migration files
+|  '- migrations/              Single consolidated Supabase SQL catalog (`all.sql`)
 |
 |- hooks/                      useTheme, useColorScheme, useScreenInsets, useNetInfo
 |
@@ -205,7 +205,7 @@ eas build --profile production
 Notes for agents:
 
 - `npm run lint` is the main repository-level verification command
-- `npm run check:rpcs` verifies that app RPC calls match `database/migrations/all_rpcs.sql`
+- `npm run check:rpcs` verifies that app RPC calls match the canonical RPC catalog inside `database/migrations/all.sql`
 - there is no dedicated automated test script in `package.json` at the moment
 
 ## Key Patterns
@@ -247,8 +247,8 @@ showToast("Visita registada com sucesso", "success");
 
 ### Adding a Database Migration
 
-1. Create a new SQL file in `database/migrations/` such as `015_add_column.sql`
-2. Increment the version in the `database/db.ts` migration runner
+1. Update the single consolidated SQL file at `database/migrations/all.sql`
+2. Increment the version in the `database/db.ts` migration runner if local SQLite changes are needed
 3. Test with `/db-migrate` or through `DataService` init
 
 Agent implication:

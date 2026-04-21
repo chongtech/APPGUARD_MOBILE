@@ -33,8 +33,9 @@ function scrubString(value: string): string {
 
 export function flushSentry(timeout = 2000): void {
   if (!sentryEnabled) return;
+  void timeout;
 
-  void Sentry.flush(timeout).catch((error) => {
+  void Sentry.flush().catch((error) => {
     if (__DEV__) console.warn("[Sentry] Flush failed", error);
   });
 }

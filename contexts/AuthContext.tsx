@@ -67,20 +67,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await withTimeout("api.init", api.init(), 5000, undefined);
       logger.info(LogCategory.AUTH, "refreshSession: api.init ok");
 
-      const [configured, sessionStaff] = await Promise.all([
-        withTimeout(
-          "isDeviceConfigured",
-          api.isDeviceConfigured(),
-          4000,
-          false,
-        ),
-        withTimeout<Staff | null>(
-          "getSessionStaff",
-          api.getSessionStaff(),
-          4000,
-          null,
-        ),
-      ]);
+      const configured = await withTimeout(
+        "isDeviceConfigured",
+        api.isDeviceConfigured(),
+        4000,
+        false,
+      );
+      const sessionStaff = configured
+        ? await withTimeout<Staff | null>(
+            "getSessionStaff",
+            api.getSessionStaff(),
+            4000,
+            null,
+          )
+        : null;
       logger.info(LogCategory.AUTH, "refreshSession: session queries ok", {
         configured,
         hasStaff: !!sessionStaff,
