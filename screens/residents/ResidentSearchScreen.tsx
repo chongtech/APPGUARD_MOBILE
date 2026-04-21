@@ -19,6 +19,11 @@ import type { Resident, Unit } from "@/types";
 
 type ResidentItem = Resident & { unitLabel?: string };
 
+function formatResultCount(count: number): string {
+  const noun = count === 1 ? "morador encontrado" : "moradores encontrados";
+  return `${count} ${noun}`;
+}
+
 export default function ResidentSearchScreen() {
   const { theme } = useTheme();
   const { staff } = useAuth();
@@ -57,20 +62,19 @@ export default function ResidentSearchScreen() {
     if (!q) return residents;
     const digits = q.replace(/\D/g, "");
     return residents.filter((r) => {
-      const nameMatch = r.name.toLowerCase().includes(q);
-      const phoneDigits = (r.phone || "").replace(/\D/g, "");
-      const phoneMatch = digits ? phoneDigits.includes(digits) : false;
-      const unitMatch = (unitMap.get(r.unit_id) || "")
-        .toLowerCase()
-        .includes(q);
-      return nameMatch || phoneMatch || unitMatch;
+      if (r.name.toLowerCase().includes(q)) return true;
+      if ((unitMap.get(r.unit_id) || "").toLowerCase().includes(q)) return true;
+      if (digits && (r.phone || "").replace(/\D/g, "").includes(digits)) {
+        return true;
+      }
+      return false;
     });
   }, [searchTerm, residents, unitMap]);
 
-  const handleCall = (phone?: string | null) => {
+  function handleCall(phone?: string | null) {
     if (!phone) return;
     Linking.openURL(`tel:${phone}`).catch(() => {});
-  };
+  }
 
   return (
     <ThemedView style={styles.container}>
@@ -103,9 +107,7 @@ export default function ResidentSearchScreen() {
       {/* Count badge */}
       <View style={styles.countRow}>
         <ThemedText type="small" style={{ color: theme.textSecondary }}>
-          {loading
-            ? "A carregar..."
-            : `${filtered.length} morador${filtered.length !== 1 ? "es" : ""} encontrado${filtered.length !== 1 ? "s" : ""}`}
+          {loading ? "A carregar..." : formatResultCount(filtered.length)}
         </ThemedText>
       </View>
 
