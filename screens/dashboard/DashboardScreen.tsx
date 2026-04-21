@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   View,
   StyleSheet,
@@ -21,17 +21,22 @@ import {
   BorderRadius,
   Shadows,
 } from "@/constants/theme";
+import { supabase } from "@/lib/supabase";
+import { useToast } from "@/contexts/ToastContext";
+import { scheduleVisitApprovalNotification } from "@/services/pushNotifications";
 import type { Visit, Incident } from "@/types";
-import { VisitStatus } from "@/types";
+import { VisitStatus, ApprovalMode } from "@/types";
 
 export default function DashboardScreen() {
   const { theme } = useTheme();
   const { staff } = useAuth();
   const { isOnline } = useNetInfo();
+  const { showToast } = useToast();
 
   const [visits, setVisits] = useState<Visit[]>([]);
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const visitsRef = useRef<Visit[]>([]);
 
   const loadData = useCallback(async () => {
     try {
@@ -39,6 +44,7 @@ export default function DashboardScreen() {
         api.getTodaysVisits(),
         api.getOpenIncidents(),
       ]);
+      visitsRef.current = v;
       setVisits(v);
       setIncidents(i);
     } catch (error) {
@@ -51,6 +57,52 @@ export default function DashboardScreen() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // Realtime: detect visit approval/denial from Resident App
+  useEffect(() => {
+    if (!supabase || !staff?.condominium_id) return;
+    const rt = supabase as any;
+    const channel = rt
+      .channel("dashboard-visit-approvals")
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "visits",
+          filter: `condominium_id=eq.${staff.condominium_id}`,
+        },
+        (payload: {
+          new: {
+            id: number;
+            visitor_name?: string;
+            status: string;
+            approval_mode?: string;
+          };
+        }) => {
+          const updated = payload.new;
+          if (updated.approval_mode !== ApprovalMode.APP) return;
+          const prev = visitsRef.current.find((v) => v.id === updated.id);
+          const wasApprovalPending =
+            !prev || prev.status === VisitStatus.PENDING;
+          if (!wasApprovalPending) return;
+          const name = updated.visitor_name ?? "Visitante";
+          if (updated.status === VisitStatus.APPROVED) {
+            showToast(`${name} foi autorizado(a) pelo morador`, "success");
+            scheduleVisitApprovalNotification(name, true).catch(() => {});
+          } else if (updated.status === VisitStatus.DENIED) {
+            showToast(`${name} foi negado(a) pelo morador`, "error");
+            scheduleVisitApprovalNotification(name, false).catch(() => {});
+          }
+          loadData();
+        },
+      )
+      .subscribe();
+
+    return () => {
+      channel.unsubscribe();
+    };
+  }, [staff?.condominium_id, loadData, showToast]);
 
   const onRefresh = useCallback(async () => {
     setIsRefreshing(true);
