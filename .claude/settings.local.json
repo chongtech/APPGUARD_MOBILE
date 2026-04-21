@@ -1,8 +1,5 @@
 {
   "permissions": {
-    "allow": [
-      "Bash(npx tsc:*)",
-      "Read(//home/achong/.claude/**)"
-    ]
+    "allow": ["Bash(npx tsc:*)", "Read(//home/achong/.claude/**)"]
   }
 }
