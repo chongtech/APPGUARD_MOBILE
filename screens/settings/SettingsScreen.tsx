@@ -14,6 +14,9 @@ import {
   BorderRadius,
 } from "@/constants/theme";
 
+type FeatherIconName = React.ComponentProps<typeof Feather>["name"];
+type ThemeShape = ReturnType<typeof useTheme>["theme"];
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
   if (bytes < 1024 * 1024 * 1024)
@@ -30,20 +33,20 @@ export default function SettingsScreen() {
   const [storageTotal, setStorageTotal] = useState<number | null>(null);
 
   useEffect(() => {
+    setDeviceId(api.currentDeviceId);
+
     api
       .getDeviceCondoDetails()
       .then((c) => setCondoName(c?.name ?? null))
       .catch(() => {});
-    setDeviceId(api.currentDeviceId);
 
-    FileSystem.getFreeDiskStorageAsync()
-      .then((free) => {
-        FileSystem.getTotalDiskCapacityAsync()
-          .then((total) => {
-            setStorageTotal(total);
-            setStorageUsed(total - free);
-          })
-          .catch(() => {});
+    Promise.all([
+      FileSystem.getFreeDiskStorageAsync(),
+      FileSystem.getTotalDiskCapacityAsync(),
+    ])
+      .then(([free, total]) => {
+        setStorageTotal(total);
+        setStorageUsed(total - free);
       })
       .catch(() => {});
   }, []);
@@ -250,15 +253,15 @@ function InfoRow({
   theme,
   mono,
 }: {
-  icon: string;
+  icon: FeatherIconName;
   label: string;
   value: string;
-  theme: any;
+  theme: ThemeShape;
   mono?: boolean;
 }) {
   return (
     <View style={styles.infoRow}>
-      <Feather name={icon as "home"} size={16} color={theme.textSecondary} />
+      <Feather name={icon} size={16} color={theme.textSecondary} />
       <ThemedText type="small" style={{ color: theme.textSecondary, flex: 1 }}>
         {label}
       </ThemedText>
