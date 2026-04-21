@@ -4,14 +4,26 @@ import { useTheme } from "@/hooks/useTheme";
 import { useScreenInsets } from "@/hooks/useScreenInsets";
 import { Spacing } from "@/constants/theme";
 
-export function ScreenFlatList<T>({ contentContainerStyle, style, ...flatListProps }: FlatListProps<T>) {
+export function ScreenFlatList<T>({
+  contentContainerStyle,
+  style,
+  ...flatListProps
+}: FlatListProps<T>) {
   const { theme } = useTheme();
   const { paddingTop, paddingBottom, scrollInsetBottom } = useScreenInsets();
 
   return (
     <FlatList
-      style={[styles.container, { backgroundColor: theme.backgroundRoot }, style]}
-      contentContainerStyle={[{ paddingTop, paddingBottom }, styles.contentContainer, contentContainerStyle]}
+      style={[
+        styles.container,
+        { backgroundColor: theme.backgroundRoot },
+        style,
+      ]}
+      contentContainerStyle={[
+        { paddingTop, paddingBottom },
+        styles.contentContainer,
+        contentContainerStyle,
+      ]}
       scrollIndicatorInsets={{ bottom: scrollInsetBottom }}
       {...flatListProps}
     />

@@ -1,36 +1,35 @@
-
 export enum UserRole {
-  ADMIN = 'ADMIN',
-  GUARD = 'GUARD',
-  SUPER_ADMIN = 'SUPER_ADMIN'
+  ADMIN = "ADMIN",
+  GUARD = "GUARD",
+  SUPER_ADMIN = "SUPER_ADMIN",
 }
 
 export enum VisitType {
-  VISITOR = 'VISITANTE',
-  DELIVERY = 'ENTREGA',
-  SERVICE = 'SERVIÇO',
-  STUDENT = 'ESTUDANTE'
+  VISITOR = "VISITANTE",
+  DELIVERY = "ENTREGA",
+  SERVICE = "SERVIÇO",
+  STUDENT = "ESTUDANTE",
 }
 
 export enum VisitStatus {
-  PENDING = 'PENDENTE',
-  APPROVED = 'AUTORIZADO',
-  DENIED = 'NEGADO',
-  INSIDE = 'NO INTERIOR',
-  LEFT = 'SAIU'
+  PENDING = "PENDENTE",
+  APPROVED = "AUTORIZADO",
+  DENIED = "NEGADO",
+  INSIDE = "NO INTERIOR",
+  LEFT = "SAIU",
 }
 
 export enum SyncStatus {
-  SYNCED = 'SINCRONIZADO',
-  PENDING_SYNC = 'PENDENTE_ENVIO'
+  SYNCED = "SINCRONIZADO",
+  PENDING_SYNC = "PENDENTE_ENVIO",
 }
 
 export enum ApprovalMode {
-  APP = 'APP',
-  PHONE = 'TELEFONE',
-  INTERCOM = 'INTERFONE',
-  GUARD_MANUAL = 'MANUAL_PORTARIA',
-  QR_SCAN = 'QR_CODE'
+  APP = "APP",
+  PHONE = "TELEFONE",
+  INTERCOM = "INTERFONE",
+  GUARD_MANUAL = "MANUAL_PORTARIA",
+  QR_SCAN = "QR_CODE",
 }
 
 export interface ApprovalModeConfig {
@@ -52,7 +51,7 @@ export interface Condominium {
   latitude?: number;
   longitude?: number;
   gps_radius_meters?: number;
-  status?: 'ACTIVE' | 'INACTIVE';
+  status?: "ACTIVE" | "INACTIVE";
   phone_number?: string;
   contact_person?: string;
   contact_email?: string;
@@ -75,7 +74,7 @@ export interface Device {
   condominium_id?: number;
   configured_at?: string;
   last_seen_at?: string;
-  status?: 'ACTIVE' | 'INACTIVE' | 'DECOMMISSIONED';
+  status?: "ACTIVE" | "INACTIVE" | "DECOMMISSIONED";
   metadata?: Record<string, unknown>;
 }
 
@@ -97,7 +96,7 @@ export interface Resident {
   name: string;
   phone?: string;
   email?: string;
-  type?: 'OWNER' | 'TENANT';
+  type?: "OWNER" | "TENANT";
   created_at?: string;
   pin_hash?: string;
   has_app_installed?: boolean;
@@ -123,7 +122,7 @@ export interface ResidentQrCode {
   start_date?: string;
   end_date?: string;
   expires_at?: string;
-  status?: 'ACTIVE' | 'EXPIRED' | 'REVOKED' | 'USED';
+  status?: "ACTIVE" | "EXPIRED" | "REVOKED" | "USED";
   created_at?: string;
   updated_at?: string;
 }
@@ -169,7 +168,7 @@ export interface Restaurant {
   condominium_id: number;
   name: string;
   description?: string;
-  status?: 'ACTIVE' | 'INACTIVE';
+  status?: "ACTIVE" | "INACTIVE";
   created_at?: string;
 }
 
@@ -178,7 +177,7 @@ export interface Sport {
   condominium_id: number;
   name: string;
   description?: string;
-  status?: 'ACTIVE' | 'INACTIVE';
+  status?: "ACTIVE" | "INACTIVE";
   created_at?: string;
 }
 
@@ -264,7 +263,7 @@ export interface IncidentActionEntry {
   created_at?: string;
   actor_id?: number | null;
   actor_name?: string;
-  action: 'acknowledged' | 'inprogress' | 'resolved' | 'note' | 'updated';
+  action: "acknowledged" | "inprogress" | "resolved" | "note" | "updated";
   status?: string;
   note?: string;
   source?: string;
@@ -300,7 +299,7 @@ export interface CondominiumStats {
   longitude?: number;
   total_visits_today: number;
   total_incidents_open: number;
-  status: 'ACTIVE' | 'INACTIVE';
+  status: "ACTIVE" | "INACTIVE";
 }
 
 export interface NewsCategory {
@@ -325,14 +324,14 @@ export interface CondominiumNews {
 }
 
 export enum Theme {
-  ELITE = 'ELITE',
-  MIDNIGHT = 'MIDNIGHT'
+  ELITE = "ELITE",
+  MIDNIGHT = "MIDNIGHT",
 }
 
 export enum PhotoQuality {
-  HIGH = 'HIGH',
-  MEDIUM = 'MEDIUM',
-  LOW = 'LOW'
+  HIGH = "HIGH",
+  MEDIUM = "MEDIUM",
+  LOW = "LOW",
 }
 
 export interface AppPricingRule {
@@ -350,12 +349,12 @@ export interface CondominiumSubscription {
   condominium_id: number;
   condominium_name?: string;
   current_residents_count?: number;
-  status: 'ACTIVE' | 'INACTIVE' | 'TRIAL';
+  status: "ACTIVE" | "INACTIVE" | "TRIAL";
   custom_price_per_resident?: number | null;
   discount_percentage?: number;
   last_payment_date?: string;
   next_due_date?: string;
-  payment_status?: 'PAID' | 'PARTIAL' | 'PENDING';
+  payment_status?: "PAID" | "PARTIAL" | "PENDING";
   months_in_arrears?: number;
   missing_months_list?: string;
   arrears_details?: Record<string, unknown>[];
@@ -372,7 +371,7 @@ export interface SubscriptionPayment {
   currency: string;
   payment_date: string;
   reference_period?: string;
-  status: 'PAID' | 'PENDING' | 'FAILED' | 'PARTIAL';
+  status: "PAID" | "PENDING" | "FAILED" | "PARTIAL";
   notes?: string;
   created_at?: string;
   updated_at?: string;

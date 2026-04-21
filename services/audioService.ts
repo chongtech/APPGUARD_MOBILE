@@ -42,20 +42,45 @@ class AudioService {
   async playAlertSound(): Promise<void> {
     if (!this.enabled) return;
     if (!this.player) {
-      logger.warn(LogCategory.GENERAL, "AudioService: player not initialized via hook");
+      logger.warn(
+        LogCategory.GENERAL,
+        "AudioService: player not initialized via hook",
+      );
       return;
     }
-    // Triple-beep pattern: 3 beeps × 350 ms apart
-    await this.playBeep();
-    setTimeout(() => { this.playBeep(); }, 350);
-    setTimeout(() => { this.playBeep(); }, 700);
+    // 4 cycles of BIP-bip-BIP (~6 s total), volume 60%
+    try {
+      this.player.volume = 0.6;
+    } catch {
+      /* not all versions expose volume */
+    }
+    const beep = () => {
+      this.playBeep();
+    };
+    // cycle offsets (ms): 0, 250, 500 | 1200, 1450, 1700 | 2400, 2650, 2900 | 3600, 3850, 4100
+    const offsets = [
+      0, 250, 500, 1200, 1450, 1700, 2400, 2650, 2900, 3600, 3850, 4100,
+    ];
+    offsets.forEach((ms) => setTimeout(beep, ms));
   }
 
   async playHapticAlert(): Promise<void> {
     try {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-      setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {}), 350);
-      setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {}), 700);
+      setTimeout(
+        () =>
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(
+            () => {},
+          ),
+        350,
+      );
+      setTimeout(
+        () =>
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(
+            () => {},
+          ),
+        700,
+      );
     } catch {
       // Haptics not available on all devices
     }

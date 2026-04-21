@@ -60,9 +60,11 @@ function buildVisitHtml(visit: Visit): string {
     ${visit.visit_type ? row("Tipo", visit.visit_type) : ""}
     ${visit.restaurant_name ? row("Restaurante", visit.restaurant_name) : ""}
     ${visit.sport_name ? row("Desporto", visit.sport_name) : ""}
-    ${visit.unit_block && visit.unit_number
-      ? row("Unidade", `Bloco ${visit.unit_block} — ${visit.unit_number}`)
-      : ""}
+    ${
+      visit.unit_block && visit.unit_number
+        ? row("Unidade", `Bloco ${visit.unit_block} — ${visit.unit_number}`)
+        : ""
+    }
     ${visit.reason ? row("Motivo", visit.reason) : ""}
     ${row("Modo de aprovação", visit.approval_mode ?? "—")}
   </div>
@@ -87,10 +89,17 @@ export async function shareVisitReceipt(visit: Visit): Promise<void> {
     const { uri } = await Print.printToFileAsync({ html, base64: false });
     const canShare = await Sharing.isAvailableAsync();
     if (canShare) {
-      await Sharing.shareAsync(uri, { UTI: ".pdf", mimeType: "application/pdf" });
+      await Sharing.shareAsync(uri, {
+        UTI: ".pdf",
+        mimeType: "application/pdf",
+      });
     }
   } catch (error) {
-    logger.error(LogCategory.GENERAL, "pdfService: failed to generate/share receipt", error);
+    logger.error(
+      LogCategory.GENERAL,
+      "pdfService: failed to generate/share receipt",
+      error,
+    );
     throw error;
   }
 }
@@ -100,7 +109,11 @@ export async function printVisitReceipt(visit: Visit): Promise<void> {
     const html = buildVisitHtml(visit);
     await Print.printAsync({ html });
   } catch (error) {
-    logger.error(LogCategory.GENERAL, "pdfService: failed to print receipt", error);
+    logger.error(
+      LogCategory.GENERAL,
+      "pdfService: failed to print receipt",
+      error,
+    );
     throw error;
   }
 }

@@ -148,9 +148,7 @@ const req = https.request(options, (res) => {
           "   → Project ID not found. Confirm the DSN belongs to entryflow-guard-mobile.",
         );
       } else if (res.statusCode === 429) {
-        console.error(
-          "   → Rate-limited. Wait a minute and try again.",
-        );
+        console.error("   → Rate-limited. Wait a minute and try again.");
       }
       process.exit(1);
     }
