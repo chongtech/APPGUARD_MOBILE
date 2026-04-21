@@ -9,7 +9,9 @@ import {
   TextInput,
   Modal,
   ScrollView,
+  Image,
 } from "react-native";
+import * as ImagePicker from "expo-image-picker";
 import { Feather } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -17,6 +19,7 @@ import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
 import { api } from "@/services/dataService";
+import { supabase } from "@/lib/supabase";
 import { logger, LogCategory } from "@/services/logger";
 import { BrandColors, Spacing, BorderRadius } from "@/constants/theme";
 import type { AdminStackParamList } from "@/navigation/AdminStackNavigator";
@@ -37,6 +40,8 @@ export default function AdminNews() {
   const [content, setContent] = useState("");
   const [categoryName, setCategoryName] = useState("");
   const [imageUrl, setImageUrl] = useState("");
+  const [imageLocalUri, setImageLocalUri] = useState<string | null>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
   const [condoId, setCondoId] = useState("");
 
   const load = useCallback(async () => {
@@ -67,6 +72,7 @@ export default function AdminNews() {
     setContent("");
     setCategoryName("");
     setImageUrl("");
+    setImageLocalUri(null);
     setCondoId("");
     setModalOpen(true);
   };
@@ -76,8 +82,46 @@ export default function AdminNews() {
     setContent(n.content ?? "");
     setCategoryName(n.category_name ?? "");
     setImageUrl(n.image_url ?? "");
+    setImageLocalUri(null);
     setCondoId(String(n.condominium_id));
     setModalOpen(true);
+  };
+
+  const pickImage = async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted)
+      return Alert.alert("Permissão", "É necessário acesso à galeria.");
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.8,
+      base64: false,
+    });
+    if (result.canceled || !result.assets?.[0]) return;
+    const asset = result.assets[0];
+    setImageLocalUri(asset.uri);
+    setUploadingImage(true);
+    try {
+      const ext = asset.uri.split(".").pop() ?? "jpg";
+      const path = `news/${Date.now()}.${ext}`;
+      const response = await fetch(asset.uri);
+      const blob = await response.blob();
+      const { error } = await (supabase as any).storage
+        .from("news")
+        .upload(path, blob, {
+          contentType: asset.mimeType ?? "image/jpeg",
+          upsert: false,
+        });
+      if (error) throw error;
+      const { data } = (supabase as any).storage
+        .from("news")
+        .getPublicUrl(path);
+      setImageUrl(data.publicUrl);
+    } catch (e) {
+      Alert.alert("Erro", "Não foi possível fazer upload da imagem.");
+      setImageLocalUri(null);
+    } finally {
+      setUploadingImage(false);
+    }
   };
 
   const handleSave = async () => {
@@ -253,7 +297,6 @@ export default function AdminNews() {
                 [
                   ["Título *", title, setTitle],
                   ["Categoria", categoryName, setCategoryName],
-                  ["URL Imagem", imageUrl, setImageUrl],
                   ["Condo ID *", condoId, setCondoId],
                 ] as [string, string, (t: string) => void][]
               ).map(([label, value, set]) => (
@@ -281,6 +324,63 @@ export default function AdminNews() {
                   />
                 </View>
               ))}
+              {/* Image picker */}
+              <View>
+                <ThemedText
+                  type="small"
+                  style={{ color: theme.textSecondary, marginBottom: 4 }}
+                >
+                  Imagem
+                </ThemedText>
+                <Pressable
+                  onPress={pickImage}
+                  disabled={uploadingImage}
+                  style={[
+                    styles.imagePicker,
+                    {
+                      borderColor: theme.border,
+                      backgroundColor: theme.backgroundSecondary,
+                    },
+                  ]}
+                >
+                  {uploadingImage ? (
+                    <ActivityIndicator color={BrandColors.primary} />
+                  ) : imageLocalUri || imageUrl ? (
+                    <Image
+                      source={{ uri: imageLocalUri ?? imageUrl }}
+                      style={styles.imagePreview}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <>
+                      <Feather
+                        name="image"
+                        size={24}
+                        color={theme.textSecondary}
+                      />
+                      <ThemedText
+                        type="small"
+                        style={{ color: theme.textSecondary, marginTop: 4 }}
+                      >
+                        Selecionar imagem
+                      </ThemedText>
+                    </>
+                  )}
+                </Pressable>
+                {imageUrl ? (
+                  <Pressable
+                    onPress={() => {
+                      setImageUrl("");
+                      setImageLocalUri(null);
+                    }}
+                    style={{ marginTop: 4 }}
+                  >
+                    <ThemedText type="small" style={{ color: "#EF4444" }}>
+                      Remover imagem
+                    </ThemedText>
+                  </Pressable>
+                ) : null}
+              </View>
               <View>
                 <ThemedText
                   type="small"
@@ -406,4 +506,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: Spacing.md,
   },
+  imagePicker: {
+    borderWidth: 1,
+    borderRadius: BorderRadius.xs,
+    borderStyle: "dashed",
+    minHeight: 100,
+    justifyContent: "center",
+    alignItems: "center",
+    overflow: "hidden",
+  },
+  imagePreview: { width: "100%", height: 150 },
 });

@@ -50,6 +50,7 @@ import type {
   Sport,
   Unit,
   Resident,
+  ResidentQrCode,
   CondominiumNews,
   IncidentType,
   IncidentStatus,
@@ -1622,6 +1623,16 @@ class DataService {
       .delete()
       .eq("id", id);
     if (error) throw error;
+  }
+
+  async adminGetResidentQrCodes(residentId: number): Promise<ResidentQrCode[]> {
+    const { data, error } = await (supabase as any)
+      .from("resident_qr_codes")
+      .select("*")
+      .eq("resident_id", residentId)
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+    return (data ?? []) as ResidentQrCode[];
   }
 
   async adminGetAllVisits(
