@@ -19,6 +19,7 @@ import { ToastProvider } from "@/contexts/ToastContext";
 import { AppContent } from "@/components/AppContent";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { useAudioService } from "@/services/audioService";
+import { usePushNotifications } from "@/services/pushNotifications";
 import { useTheme } from "@/hooks/useTheme";
 
 // Initialize Sentry before rendering
@@ -59,6 +60,8 @@ function AppInner() {
 
   // Register audio player with the singleton service
   useAudioService();
+  // Request push notification permissions and register token
+  usePushNotifications();
 
   return (
     <NavigationContainer
